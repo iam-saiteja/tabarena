@@ -65,6 +65,8 @@ _LAZY_CLASSES: dict[str, str] = {
     "TabSTARModel": "tabarena.models.tabstar.model",
     "TabSwiftModel": "tabarena.models.tabswift.model",
     "XRFMModel": "tabarena.models.xrfm.model",
+    "ZSISABModel": "tabarena.models.zsisab.model",
+    "ZSTabFMModel": "tabarena.models.zstabfm.model",
 }
 
 
