@@ -56,32 +56,97 @@ class ZSISABModel(AbstractTorchModel):
             "raise_on_model_failure": False,
         }
 
-    def _preprocess(self, X: pd.DataFrame, is_train: bool = False, **kwargs) -> pd.DataFrame:
-        X = super()._preprocess(X, **kwargs)
+    def _preprocess(self, X: pd.DataFrame, is_train: bool = False, y: pd.Series | None = None, **kwargs) -> pd.DataFrame:
+        if getattr(self, "_features", None) is not None:
+            try:
+                X = super()._preprocess(X, **kwargs)
+            except Exception:
+                pass
 
         if is_train:
-            self._feature_generator = LabelEncoderFeatureGenerator(verbosity=0)
-            self._feature_generator.fit(X=X)
-            if X.shape[1] > 100:
+            cat_cols = [c for c in X.columns if str(X[c].dtype) in ["category", "object", "bool", "string"]]
+            num_cols = [c for c in X.columns if c not in cat_cols]
+            self._cat_cols = cat_cols
+            self._num_cols = num_cols
+
+            if len(cat_cols) > 0 and y is not None:
+                from sklearn.preprocessing import TargetEncoder
+                y_arr = y.to_numpy() if hasattr(y, "to_numpy") else np.array(y)
+                try:
+                    cv_folds = min(5, max(2, len(X) // 2))
+                    self._target_encoder = TargetEncoder(smooth="auto", cv=cv_folds, random_state=42)
+                    self._target_encoder.fit(X[cat_cols].astype(str), y_arr)
+                except Exception:
+                    self._target_encoder = None
+            else:
+                self._target_encoder = None
+
+            if len(cat_cols) > 0:
+                from sklearn.preprocessing import OrdinalEncoder
+                self._ordinal_encoder = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
+                self._ordinal_encoder.fit(X[cat_cols].astype(str))
+            else:
+                self._ordinal_encoder = None
+
+            if len(num_cols) > 0:
+                from sklearn.preprocessing import QuantileTransformer
+                n_q = min(1000, max(10, len(X)))
+                self._quantile_transformer = QuantileTransformer(n_quantiles=n_q, output_distribution="normal", random_state=42)
+                try:
+                    num_arr = np.nan_to_num(X[num_cols].to_numpy(dtype=np.float32), nan=0.0)
+                    self._quantile_transformer.fit(num_arr)
+                except Exception:
+                    self._quantile_transformer = None
+            else:
+                self._quantile_transformer = None
+
+            n_total = len(cat_cols) + len(num_cols)
+            if n_total > 100:
                 from sklearn.decomposition import TruncatedSVD
-                n_comp = min(100, max(1, X.shape[0] - 1), X.shape[1])
+                n_comp = min(100, max(1, X.shape[0] - 1), n_total)
                 self._dim_reducer = TruncatedSVD(n_components=n_comp, random_state=42)
             else:
                 self._dim_reducer = None
 
-        if self._feature_generator is not None and getattr(self._feature_generator, "features_in", None):
-            X = X.copy()
-            X[self._feature_generator.features_in] = self._feature_generator.transform(X=X)
+        out_parts = []
+        if getattr(self, "_cat_cols", None) and len(self._cat_cols) > 0:
+            if getattr(self, "_target_encoder", None) is not None:
+                try:
+                    cat_trans = self._target_encoder.transform(X[self._cat_cols].astype(str))
+                    cat_arr = np.nan_to_num(np.array(cat_trans, dtype=np.float32), nan=0.0)
+                    out_parts.append(cat_arr)
+                except Exception:
+                    cat_trans = self._ordinal_encoder.transform(X[self._cat_cols].astype(str))
+                    cat_arr = np.nan_to_num(np.array(cat_trans, dtype=np.float32), nan=0.0)
+                    out_parts.append(cat_arr)
+            elif getattr(self, "_ordinal_encoder", None) is not None:
+                cat_trans = self._ordinal_encoder.transform(X[self._cat_cols].astype(str))
+                cat_arr = np.nan_to_num(np.array(cat_trans, dtype=np.float32), nan=0.0)
+                out_parts.append(cat_arr)
 
-        if hasattr(self, "_dim_reducer") and self._dim_reducer is not None:
-            X_arr = np.nan_to_num(X.to_numpy(dtype=np.float32), nan=0.0)
-            if is_train:
-                X_red = self._dim_reducer.fit_transform(X_arr)
+        if getattr(self, "_num_cols", None) and len(self._num_cols) > 0:
+            num_raw = np.nan_to_num(X[self._num_cols].to_numpy(dtype=np.float32), nan=0.0)
+            if getattr(self, "_quantile_transformer", None) is not None:
+                try:
+                    num_trans = self._quantile_transformer.transform(num_raw)
+                    out_parts.append(np.nan_to_num(num_trans.astype(np.float32), nan=0.0))
+                except Exception:
+                    out_parts.append(num_raw)
             else:
-                X_red = self._dim_reducer.transform(X_arr)
-            X = pd.DataFrame(X_red, columns=[f"comp_{i}" for i in range(X_red.shape[1])], index=X.index)
+                out_parts.append(num_raw)
 
-        return X
+        if len(out_parts) > 0:
+            X_arr = np.hstack(out_parts)
+        else:
+            X_arr = np.nan_to_num(X.to_numpy(dtype=np.float32), nan=0.0)
+
+        if getattr(self, "_dim_reducer", None) is not None:
+            if is_train:
+                X_arr = self._dim_reducer.fit_transform(X_arr)
+            else:
+                X_arr = self._dim_reducer.transform(X_arr)
+
+        return pd.DataFrame(X_arr, columns=[f"f_{i}" for i in range(X_arr.shape[1])], index=X.index)
 
     def _fit(
         self,
