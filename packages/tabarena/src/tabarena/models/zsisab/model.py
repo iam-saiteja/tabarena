@@ -100,14 +100,6 @@ class ZSISABModel(AbstractTorchModel):
             else:
                 self._quantile_transformer = None
 
-            n_total = len(cat_cols) + len(num_cols)
-            if n_total > 100:
-                from sklearn.decomposition import TruncatedSVD
-                n_comp = min(100, max(1, X.shape[0] - 1), n_total)
-                self._dim_reducer = TruncatedSVD(n_components=n_comp, random_state=42)
-            else:
-                self._dim_reducer = None
-
         out_parts = []
         if getattr(self, "_cat_cols", None) and len(self._cat_cols) > 0:
             if getattr(self, "_target_encoder", None) is not None:
@@ -140,11 +132,20 @@ class ZSISABModel(AbstractTorchModel):
         else:
             X_arr = np.nan_to_num(X.to_numpy(dtype=np.float32), nan=0.0)
 
-        if getattr(self, "_dim_reducer", None) is not None:
-            if is_train:
+        # Enforce max 100 features for TabPFN architecture
+        if is_train:
+            if X_arr.shape[1] > 100:
+                from sklearn.decomposition import TruncatedSVD
+                n_comp = min(100, max(1, X_arr.shape[0] - 1), X_arr.shape[1])
+                self._dim_reducer = TruncatedSVD(n_components=n_comp, random_state=42)
                 X_arr = self._dim_reducer.fit_transform(X_arr)
             else:
+                self._dim_reducer = None
+        else:
+            if getattr(self, "_dim_reducer", None) is not None:
                 X_arr = self._dim_reducer.transform(X_arr)
+            elif X_arr.shape[1] > 100:
+                X_arr = X_arr[:, :100]
 
         return pd.DataFrame(X_arr, columns=[f"f_{i}" for i in range(X_arr.shape[1])], index=X.index)
 
