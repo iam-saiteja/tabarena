@@ -191,6 +191,14 @@ class ZSTabFMModel(AbstractTorchModel):
             "interface": "default",
         }
 
+    def score_with_y_pred_proba(self, y, y_pred_proba, **kwargs) -> float:
+        try:
+            return super().score_with_y_pred_proba(y=y, y_pred_proba=y_pred_proba, **kwargs)
+        except ValueError as e:
+            if "Only one class present" in str(e):
+                return 0.5
+            raise
+
     def get_device(self) -> str:
         param = next(self.model.model.parameters(), None) if hasattr(self, "model") and hasattr(self.model, "model") else None
         return str(param.device) if param is not None else "cpu"
