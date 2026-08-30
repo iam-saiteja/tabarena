@@ -221,7 +221,7 @@ class ZSTabFMModel(AbstractTorchModel):
     def _more_tags(self) -> dict:
         return {"can_refit_full": True}
 
-    def get_memory_size(self) -> int:
+    def get_memory_size(self, allow_exception: bool = False, **kwargs) -> int:
         return 100 * 1024 * 1024  # 100 MB integer memory estimate
 
     def _estimate_memory_usage(self, X: pd.DataFrame, **kwargs) -> int:
