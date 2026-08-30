@@ -207,12 +207,19 @@ class ZSTabFMModel(AbstractTorchModel):
         return str(param.device) if param is not None else "cpu"
 
     def _set_device(self, device: str):
-        if hasattr(self, "model") and getattr(self.model, "model", None) is not None:
-            self.model.model.to(device)
+        if getattr(self.model, "model", None) is not None:
+            try:
+                self.model.model.to(device)
+            except Exception as e:
+                import torch
+                if "CUDA out of memory" in str(e) or isinstance(e, torch.cuda.OutOfMemoryError):
+                    torch.cuda.empty_cache()
+                    self.model.model.to("cpu")
+                else:
+                    raise
 
     def _more_tags(self) -> dict:
         return {"can_refit_full": True}
 
     def _estimate_memory_usage(self, X: pd.DataFrame, **kwargs) -> int:
         return 100 * 1024 * 1024  # Constant low memory overhead
-
