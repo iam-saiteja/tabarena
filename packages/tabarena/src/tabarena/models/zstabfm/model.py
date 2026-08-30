@@ -29,6 +29,39 @@ def _resolve_device(device: str | None, num_gpus: int, *, cuda_available: bool) 
     return "cuda" if want_gpu else "cpu"
 
 
+def _stratified_prototype_indices(train_y: torch.Tensor, M: int, max_train: int, device: torch.device) -> torch.Tensor:
+    """Selects M prototypes with guaranteed class representation across all labels."""
+    if train_y is None or train_y.dim() == 0:
+        return torch.randperm(max_train, device=device)[:M]
+    
+    y_flat = train_y.view(-1)
+    unique_classes = torch.unique(y_flat)
+    if len(unique_classes) <= 1:
+        return torch.randperm(max_train, device=device)[:M]
+
+    per_class = []
+    quota = max(1, M // len(unique_classes))
+
+    for cls in unique_classes:
+        cls_idx = torch.where(y_flat == cls)[0]
+        n_take = min(quota, len(cls_idx))
+        if n_take > 0:
+            perm = cls_idx[torch.randperm(len(cls_idx), device=device)[:n_take]]
+            per_class.append(perm)
+
+    selected = torch.cat(per_class) if len(per_class) > 0 else torch.randperm(max_train, device=device)[:M]
+    if len(selected) < M:
+        mask = torch.ones(max_train, dtype=torch.bool, device=device)
+        mask[selected] = False
+        rem = torch.where(mask)[0]
+        n_more = min(M - len(selected), len(rem))
+        if n_more > 0:
+            extra = rem[torch.randperm(len(rem), device=device)[:n_more]]
+            selected = torch.cat([selected, extra])
+
+    return selected[torch.randperm(len(selected), device=device)]
+
+
 def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512):
     """Patches TabFM's ICLearning module with ZS-ISAB linear attention for large context."""
     if not hasattr(base_model, "icl"):
@@ -43,16 +76,15 @@ def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512):
 
         # If training context exceeds num_prototypes, use Zero-Shot ISAB prototype distillation
         if cache is None and max_train > num_prototypes and not return_cache:
-            # Multi-Resolution Prototype Distillation
             M = min(num_prototypes, max_train)
             device = reps.device
-            
-            # Select diverse prototypes from train context
+
             train_reps = reps[:, :max_train, :]
             train_y = y[:, :max_train] if y is not None else None
             test_reps = reps[:, max_train:, :]
 
-            perm = torch.randperm(max_train, device=device)[:M]
+            # Class-stratified prototype selection for robust decision boundaries
+            perm = _stratified_prototype_indices(train_y[0] if train_y is not None else None, M, max_train, device)
             proto_reps = train_reps[:, perm, :]
             proto_y = train_y[:, perm] if train_y is not None else None
 
@@ -62,8 +94,8 @@ def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512):
                 y_sub = torch.cat([proto_y, torch.zeros((b, test_reps.shape[1]), dtype=torch.long, device=device)], dim=1)
             else:
                 y_sub = torch.cat([proto_y, torch.zeros((b, test_reps.shape[1]), dtype=reps.dtype, device=device)], dim=1)
-            
-            train_size_sub = torch.full_like(train_size, M)
+
+            train_size_sub = torch.full_like(train_size, len(perm))
             return orig_forward(reps_sub, y_sub, train_size_sub, cache=cache, return_cache=return_cache)
 
         return orig_forward(reps, y, train_size, cache=cache, return_cache=return_cache)
