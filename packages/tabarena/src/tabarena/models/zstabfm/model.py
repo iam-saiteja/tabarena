@@ -178,9 +178,12 @@ class ZSTabFMModel(AbstractTorchModel):
         return self
 
     def _predict_proba(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
-        if hasattr(self.model, "predict_proba"):
-            return self.model.predict_proba(X)
-        return self.model.predict(X)
+        if self.problem_type == "regression":
+            return self.model.predict(X)
+        probs = self.model.predict_proba(X)
+        if self.problem_type == "binary" and probs.ndim == 2 and probs.shape[1] == 2:
+            return probs[:, 1]
+        return probs
 
     def _predict(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
         return self.model.predict(X)
