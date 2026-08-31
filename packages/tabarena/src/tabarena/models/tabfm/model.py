@@ -66,11 +66,14 @@ def _build_tabfm_estimator(*, problem_type: str, device: str, interface: str, **
     else:
         raise AssertionError(f"Unsupported problem_type: {problem_type}")
 
-    # Downloads the pre-trained PyTorch checkpoint from Hugging Face on first use (see
-    # `prefetch_weights`); a no-op once cached. Loading with `device` places the network there,
-    # which is where the estimator runs. The network bounds its own peak activation memory via
-    # always-on internal chunking, so large tasks need no wrapper-side handling.
-    base_model = tabfm_v1_0_0_pytorch.load(model_type=model_type, device=device)
+    import torch
+    from pathlib import Path
+    checkpoint_dir = Path.home() / ".cache" / "tabfm_checkpoint"
+    dtype = torch.bfloat16 if device == "cuda" else torch.float32
+    if checkpoint_dir.exists() and (checkpoint_dir / model_type / "model.safetensors").exists():
+        base_model = tabfm_v1_0_0_pytorch.load(model_type=model_type, checkpoint_path=str(checkpoint_dir), device=device, dtype=dtype)
+    else:
+        base_model = tabfm_v1_0_0_pytorch.load(model_type=model_type, device=device, dtype=dtype)
 
     factory = model_cls.ensemble if interface == "ensemble" else model_cls
     return factory(model=base_model, **hps)
