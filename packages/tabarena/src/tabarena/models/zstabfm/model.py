@@ -210,13 +210,17 @@ class ZSTabFMModel(AbstractTorchModel):
         if getattr(self.model, "model", None) is not None:
             try:
                 self.model.model.to(device)
-            except Exception as e:
+            except Exception:
                 import torch
-                if "CUDA out of memory" in str(e) or isinstance(e, torch.cuda.OutOfMemoryError):
-                    torch.cuda.empty_cache()
+                if torch.cuda.is_available():
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                try:
                     self.model.model.to("cpu")
-                else:
-                    raise
+                except Exception:
+                    pass
 
     def _more_tags(self) -> dict:
         return {"can_refit_full": True}
