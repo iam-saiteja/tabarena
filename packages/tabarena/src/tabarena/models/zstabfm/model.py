@@ -104,6 +104,9 @@ def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512):
     return base_model
 
 
+_BASE_MODEL_CACHE: dict = {}
+
+
 def _build_zstabfm_estimator(*, problem_type: str, device: str, interface: str = "default", num_prototypes: int = 512, **hps):
     from pathlib import Path
     from tabfm import TabFMClassifier, TabFMRegressor, tabfm_v1_0_0_pytorch
@@ -116,14 +119,19 @@ def _build_zstabfm_estimator(*, problem_type: str, device: str, interface: str =
         raise AssertionError(f"Unsupported problem_type: {problem_type}")
 
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
-    checkpoint_dir = Path.home() / ".cache" / "tabfm_checkpoint"
-    if checkpoint_dir.exists() and (checkpoint_dir / model_type / "model.safetensors").exists():
-        base_model = tabfm_v1_0_0_pytorch.load(model_type=model_type, checkpoint_path=str(checkpoint_dir), device=device, dtype=dtype)
-    else:
-        base_model = tabfm_v1_0_0_pytorch.load(model_type=model_type, device=device, dtype=dtype)
+    cache_key = (model_type, str(device), str(dtype), num_prototypes)
 
-    base_model = patch_tabfm_with_zsisab(base_model, num_prototypes=num_prototypes)
+    if cache_key not in _BASE_MODEL_CACHE:
+        checkpoint_dir = Path.home() / ".cache" / "tabfm_checkpoint"
+        if checkpoint_dir.exists() and (checkpoint_dir / model_type / "model.safetensors").exists():
+            base_model = tabfm_v1_0_0_pytorch.load(model_type=model_type, checkpoint_path=str(checkpoint_dir), device=device, dtype=dtype)
+        else:
+            base_model = tabfm_v1_0_0_pytorch.load(model_type=model_type, device=device, dtype=dtype)
 
+        base_model = patch_tabfm_with_zsisab(base_model, num_prototypes=num_prototypes)
+        _BASE_MODEL_CACHE[cache_key] = base_model
+
+    base_model = _BASE_MODEL_CACHE[cache_key]
     factory = model_cls.ensemble if interface == "ensemble" else model_cls
     return factory(model=base_model, **hps)
 
