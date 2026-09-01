@@ -169,7 +169,7 @@ def _load_tabfm_safely(model_type: str, device: str, dtype: Any) -> nn.Module:
     return tabfm_v1_0_0_pytorch.load(model_type=model_type, device=device, dtype=dtype)
 
 
-def _build_zstabfm_estimator(*, problem_type: str, device: str, interface: str = "default", num_prototypes: int = 512, num_draws: int = 3, **hps):
+def _build_zstabfm_estimator(*, problem_type: str, device: str, interface: str = "default", num_prototypes: int = 512, num_draws: int = 1, **hps):
     from tabfm import TabFMClassifier, TabFMRegressor
 
     if problem_type in ["binary", "multiclass"]:
@@ -263,7 +263,7 @@ class ZSTabFMModel(AbstractTorchModel):
     def _get_default_searchspace(self) -> dict:
         return {
             "num_prototypes": 512,
-            "num_draws": 3,
+            "num_draws": 1,
             "interface": "default",
         }
 
