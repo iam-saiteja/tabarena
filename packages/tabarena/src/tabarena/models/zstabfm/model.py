@@ -189,6 +189,7 @@ def _build_zstabfm_estimator(*, problem_type: str, device: str, interface: str =
 
     base_model = _BASE_MODEL_CACHE[cache_key]
     factory = model_cls.ensemble if interface == "ensemble" else model_cls
+    hps.setdefault("max_num_rows", 1000)
     return factory(model=base_model, **hps)
 
 
