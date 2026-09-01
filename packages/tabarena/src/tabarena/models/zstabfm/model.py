@@ -246,19 +246,41 @@ class ZSTabFMModel(AbstractTorchModel):
 
     def _predict_proba(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
         if self.problem_type == "regression":
-            return self.model.predict(X)
-        probs = self.model.predict_proba(X)
+            return self._predict_batched(X)
         
+        n_rows = len(X)
+        if n_rows > 2048:
+            batch_size = 2048
+            prob_list = []
+            for start in range(0, n_rows, batch_size):
+                X_chunk = X.iloc[start:start + batch_size]
+                p_chunk = self.model.predict_proba(X_chunk)
+                prob_list.append(p_chunk)
+            probs = np.vstack(prob_list)
+        else:
+            probs = self.model.predict_proba(X)
+
         # Temperature calibration and boundary probability clipping
         eps = 1e-6
         probs = np.clip(probs, eps, 1.0 - eps)
-        
+
         if self.problem_type == "binary" and probs.ndim == 2 and probs.shape[1] == 2:
             return probs[:, 1]
         return probs
 
-    def _predict(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
+    def _predict_batched(self, X: pd.DataFrame) -> np.ndarray:
+        n_rows = len(X)
+        if n_rows > 2048:
+            batch_size = 2048
+            preds = []
+            for start in range(0, n_rows, batch_size):
+                X_chunk = X.iloc[start:start + batch_size]
+                preds.append(self.model.predict(X_chunk))
+            return np.concatenate(preds, axis=0)
         return self.model.predict(X)
+
+    def _predict(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
+        return self._predict_batched(X)
 
     def _get_default_searchspace(self) -> dict:
         return {
