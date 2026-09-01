@@ -30,7 +30,7 @@ def _resolve_device(device: str | None, num_gpus: int, *, cuda_available: bool) 
 
 
 def _stratified_prototype_indices(train_y: torch.Tensor, M: int, max_train: int, device: torch.device, seed: int = 0) -> torch.Tensor:
-    """Selects M prototypes with guaranteed class representation across all labels."""
+    """Selects M prototypes with guaranteed class or quantile representation across all labels/targets."""
     g = torch.Generator(device=device) if device.type != "cpu" else torch.Generator()
     g.manual_seed(seed)
 
@@ -38,7 +38,23 @@ def _stratified_prototype_indices(train_y: torch.Tensor, M: int, max_train: int,
         return torch.randperm(max_train, generator=g, device=device)[:M]
     
     y_flat = train_y.view(-1)
-    unique_classes = torch.unique(y_flat)
+
+    # For continuous regression targets, bin into 10 quantile buckets
+    if y_flat.dtype in (torch.float32, torch.float64, torch.bfloat16, torch.float16):
+        try:
+            sorted_idx = torch.argsort(y_flat)
+            bin_size = len(sorted_idx) // 10
+            y_bins = torch.zeros_like(y_flat, dtype=torch.long)
+            for b in range(10):
+                end = len(sorted_idx) if b == 9 else (b + 1) * bin_size
+                y_bins[sorted_idx[b * bin_size:end]] = b
+            unique_classes = torch.arange(10, device=device)
+            y_flat = y_bins
+        except Exception:
+            unique_classes = torch.unique(y_flat)
+    else:
+        unique_classes = torch.unique(y_flat)
+
     if len(unique_classes) <= 1:
         return torch.randperm(max_train, generator=g, device=device)[:M]
 
@@ -169,7 +185,7 @@ def _load_tabfm_safely(model_type: str, device: str, dtype: Any) -> nn.Module:
     return tabfm_v1_0_0_pytorch.load(model_type=model_type, device=device, dtype=dtype)
 
 
-def _build_zstabfm_estimator(*, problem_type: str, device: str, interface: str = "default", num_prototypes: int = 512, num_draws: int = 1, **hps):
+def _build_zstabfm_estimator(*, problem_type: str, device: str, interface: str = "default", num_prototypes: int = 1024, num_draws: int = 1, **hps):
     from tabfm import TabFMClassifier, TabFMRegressor
 
     if problem_type in ["binary", "multiclass"]:
@@ -304,7 +320,7 @@ class ZSTabFMModel(AbstractTorchModel):
 
     def _get_default_searchspace(self) -> dict:
         return {
-            "num_prototypes": 512,
+            "num_prototypes": 1024,
             "num_draws": 1,
             "interface": "default",
         }
