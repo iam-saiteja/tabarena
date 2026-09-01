@@ -220,6 +220,10 @@ class ZSTabFMModel(AbstractTorchModel):
     ):
         import torch
 
+        if torch.cuda.is_available():
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+
         hps = self._get_model_params()
         device = _resolve_device(
             hps.pop("device", None),
@@ -228,7 +232,7 @@ class ZSTabFMModel(AbstractTorchModel):
         )
         interface = hps.pop("interface", "default")
         num_prototypes = hps.pop("num_prototypes", 512)
-        num_draws = hps.pop("num_draws", 3)
+        num_draws = hps.pop("num_draws", 1)
 
         self.model = _build_zstabfm_estimator(
             problem_type=self.problem_type,
@@ -240,25 +244,39 @@ class ZSTabFMModel(AbstractTorchModel):
         )
 
         y_fit = y.to_numpy() if hasattr(y, "to_numpy") else np.array(y)
-        self.model.fit(X, y_fit)
+        with torch.inference_mode():
+            self.model.fit(X, y_fit)
         self._target_device = device
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         return self
 
+    def _preprocess(self, X: pd.DataFrame, is_train: bool = False, **kwargs) -> pd.DataFrame:
+        X = super()._preprocess(X, is_train=is_train, **kwargs)
+        for col in X.columns:
+            if X[col].dtype == object or isinstance(X[col].dtype, pd.CategoricalDtype):
+                X[col] = X[col].astype("category")
+        return X
+
     def _predict_proba(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
-        if self.problem_type == "regression":
-            return self._predict_batched(X)
-        
-        n_rows = len(X)
-        if n_rows > 2048:
-            batch_size = 2048
-            prob_list = []
-            for start in range(0, n_rows, batch_size):
-                X_chunk = X.iloc[start:start + batch_size]
-                p_chunk = self.model.predict_proba(X_chunk)
-                prob_list.append(p_chunk)
-            probs = np.vstack(prob_list)
-        else:
-            probs = self.model.predict_proba(X)
+        import torch
+        with torch.inference_mode():
+            if self.problem_type == "regression":
+                return self._predict_batched(X)
+            
+            n_rows = len(X)
+            if n_rows > 2048:
+                batch_size = 2048
+                prob_list = []
+                for start in range(0, n_rows, batch_size):
+                    X_chunk = X.iloc[start:start + batch_size]
+                    p_chunk = self.model.predict_proba(X_chunk)
+                    prob_list.append(p_chunk)
+                probs = np.vstack(prob_list)
+            else:
+                probs = self.model.predict_proba(X)
 
         # Temperature calibration and boundary probability clipping
         eps = 1e-6
@@ -269,15 +287,17 @@ class ZSTabFMModel(AbstractTorchModel):
         return probs
 
     def _predict_batched(self, X: pd.DataFrame) -> np.ndarray:
-        n_rows = len(X)
-        if n_rows > 2048:
-            batch_size = 2048
-            preds = []
-            for start in range(0, n_rows, batch_size):
-                X_chunk = X.iloc[start:start + batch_size]
-                preds.append(self.model.predict(X_chunk))
-            return np.concatenate(preds, axis=0)
-        return self.model.predict(X)
+        import torch
+        with torch.inference_mode():
+            n_rows = len(X)
+            if n_rows > 2048:
+                batch_size = 2048
+                preds = []
+                for start in range(0, n_rows, batch_size):
+                    X_chunk = X.iloc[start:start + batch_size]
+                    preds.append(self.model.predict(X_chunk))
+                return np.concatenate(preds, axis=0)
+            return self.model.predict(X)
 
     def _predict(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
         return self._predict_batched(X)
