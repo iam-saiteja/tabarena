@@ -260,8 +260,28 @@ class ZSTabFMModel(AbstractTorchModel):
         )
 
         y_fit = y.to_numpy() if hasattr(y, "to_numpy") else np.array(y)
+
+        # Cap in-context training rows to 1000 stratified prototypes when N > 1000 to prevent CUDA OOM on massive tables
+        if len(X) > 1000:
+            try:
+                y_tensor = torch.from_numpy(y_fit) if isinstance(y_fit, np.ndarray) else torch.tensor(y_fit)
+                idx = _stratified_prototype_indices(
+                    y_tensor,
+                    M=1000,
+                    max_train=len(X),
+                    device=torch.device("cpu"),
+                    seed=42,
+                ).cpu().numpy()
+                X_fit = X.iloc[idx] if hasattr(X, "iloc") else X[idx]
+                y_fit = y_fit[idx]
+            except Exception:
+                X_fit = X.iloc[:1000] if hasattr(X, "iloc") else X[:1000]
+                y_fit = y_fit[:1000]
+        else:
+            X_fit = X
+
         with torch.inference_mode():
-            self.model.fit(X, y_fit)
+            self.model.fit(X_fit, y_fit)
         self._target_device = device
 
         if torch.cuda.is_available():
@@ -282,14 +302,17 @@ class ZSTabFMModel(AbstractTorchModel):
             if self.problem_type == "regression":
                 return self._predict_batched(X)
             
-            n_rows = len(X)
-            if n_rows > 2048:
-                batch_size = 2048
+            n_rows, n_cols = len(X), X.shape[1] if hasattr(X, "shape") else 10
+            batch_size = 128 if n_cols > 100 else (512 if n_cols > 30 else 2048)
+
+            if n_rows > batch_size:
                 prob_list = []
                 for start in range(0, n_rows, batch_size):
                     X_chunk = X.iloc[start:start + batch_size]
                     p_chunk = self.model.predict_proba(X_chunk)
                     prob_list.append(p_chunk)
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                 probs = np.vstack(prob_list)
             else:
                 probs = self.model.predict_proba(X)
@@ -305,13 +328,16 @@ class ZSTabFMModel(AbstractTorchModel):
     def _predict_batched(self, X: pd.DataFrame) -> np.ndarray:
         import torch
         with torch.inference_mode():
-            n_rows = len(X)
-            if n_rows > 2048:
-                batch_size = 2048
+            n_rows, n_cols = len(X), X.shape[1] if hasattr(X, "shape") else 10
+            batch_size = 128 if n_cols > 100 else (512 if n_cols > 30 else 2048)
+
+            if n_rows > batch_size:
                 preds = []
                 for start in range(0, n_rows, batch_size):
                     X_chunk = X.iloc[start:start + batch_size]
                     preds.append(self.model.predict(X_chunk))
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                 return np.concatenate(preds, axis=0)
             return self.model.predict(X)
 
