@@ -41,8 +41,9 @@ def _auto_vram_config() -> dict:
         vram_gb = 4.0
 
     if vram_gb < 5:
-        return {"fit_cap": 1000, "num_prototypes": 512,
-                "batch_d_large": 128, "batch_d_med": 512, "batch_d_small": 2048}
+        # Ultra-safe config for 4GB laptop GPUs to prevent Windows TDR crashes / restarts
+        return {"fit_cap": 800, "num_prototypes": 384,
+                "batch_d_large": 64, "batch_d_med": 128, "batch_d_small": 512}
     elif vram_gb < 9:
         return {"fit_cap": 2000, "num_prototypes": 1024,
                 "batch_d_large": 256, "batch_d_med": 1024, "batch_d_small": 2048}
