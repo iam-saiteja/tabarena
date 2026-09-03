@@ -18,6 +18,42 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Step 3: VRAM Auto-Scaling
+# Detects GPU VRAM at runtime and returns optimal config for the hardware.
+# ---------------------------------------------------------------------------
+
+def _auto_vram_config() -> dict:
+    """Returns optimal config dict based on detected GPU VRAM.
+
+    Tiers:
+      < 5 GB  — RTX 3050 4GB, GTX 1650 4GB
+      < 9 GB  — RTX 3060 8GB, RTX 2080 8GB
+      < 16 GB — RTX 3080 12GB, RTX 4070 12GB
+      >= 16 GB — RTX 4090 24GB, A100 40GB+
+    """
+    if not torch.cuda.is_available():
+        return {"fit_cap": 500, "num_prototypes": 256,
+                "batch_d_large": 64, "batch_d_med": 256, "batch_d_small": 512}
+    try:
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+    except Exception:
+        vram_gb = 4.0
+
+    if vram_gb < 5:
+        return {"fit_cap": 1000, "num_prototypes": 512,
+                "batch_d_large": 128, "batch_d_med": 512, "batch_d_small": 2048}
+    elif vram_gb < 9:
+        return {"fit_cap": 2000, "num_prototypes": 1024,
+                "batch_d_large": 256, "batch_d_med": 1024, "batch_d_small": 2048}
+    elif vram_gb < 16:
+        return {"fit_cap": 3000, "num_prototypes": 1536,
+                "batch_d_large": 512, "batch_d_med": 1536, "batch_d_small": 2048}
+    else:
+        return {"fit_cap": 5000, "num_prototypes": 2048,
+                "batch_d_large": 1024, "batch_d_med": 2048, "batch_d_small": 2048}
+
+
 def _resolve_device(device: str | None, num_gpus: int, *, cuda_available: bool) -> str:
     if device is not None:
         device = str(device).lower()
@@ -83,7 +119,19 @@ def _stratified_prototype_indices(train_y: torch.Tensor, M: int, max_train: int,
 
 
 def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512, num_draws: int = 3):
-    """Patches TabFM's ICLearning module with ZS-ISAB linear attention and Deep Multi-Draw In-Context ensembling."""
+    """Patches TabFM's ICLearning module with Multi-Draw RAPS prototype selection.
+
+    RAPS (Retrieval-Augmented Prototype Selection):
+      For each test batch, computes cosine similarity between the test-batch centroid
+      in TabFM embedding space and every stored training row embedding, then selects
+      the top-M most relevant training rows as the ICL context.
+
+    Multi-Draw (default k=3):
+      Draw 0: pure RAPS, noise=0.00 — highest relevance
+      Draw 1: RAPS + Gaussian noise sigma=0.08 — slight neighborhood diversity
+      Draw 2: RAPS + Gaussian noise sigma=0.16 — wider diversity
+      Final output = mean of all draw logits for variance reduction.
+    """
     if not hasattr(base_model, "icl"):
         return base_model
 
@@ -94,40 +142,71 @@ def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512, nu
         b, t, e = reps.shape
         max_train = int(train_size.max().item()) if train_size is not None else 0
 
-        # If training context exceeds num_prototypes, use Zero-Shot ISAB multi-draw prototype distillation
+        # Activate RAPS+Multi-Draw only when training context exceeds prototype budget
         if cache is None and max_train > num_prototypes and not return_cache:
             M = min(num_prototypes, max_train)
             device = reps.device
 
-            train_reps = reps[:, :max_train, :]
+            train_reps = reps[:, :max_train, :]          # [B, N, E]
             train_y = y[:, :max_train] if y is not None else None
-            test_reps = reps[:, max_train:, :]
+            test_reps = reps[:, max_train:, :]            # [B, Q, E]
 
             draw_outputs = []
             k_draws = max(1, num_draws)
 
             for d in range(k_draws):
-                # Class-stratified orthogonal prototype selection
-                perm = _stratified_prototype_indices(train_y[0] if train_y is not None else None, M, max_train, device, seed=d * 1000 + 42)
-                proto_reps = train_reps[:, perm, :]
-                proto_y = train_y[:, perm] if train_y is not None else None
+                # ---------------------------------------------------------
+                # RAPS: select top-M training rows by cosine similarity to
+                # the test batch centroid in embedding space
+                # ---------------------------------------------------------
+                if test_reps.shape[1] > 0:
+                    test_centroid = test_reps.mean(dim=1, keepdim=True)              # [B, 1, E]
+                    train_norm = F.normalize(train_reps, dim=-1)                     # [B, N, E]
+                    cent_norm = F.normalize(test_centroid, dim=-1)                   # [B, 1, E]
+                    sims = torch.bmm(train_norm, cent_norm.transpose(1, 2)).squeeze(-1)  # [B, N]
 
-                # Construct distilled in-context representation
-                reps_sub = torch.cat([proto_reps, test_reps], dim=1)
-                if icl_module.is_classifier:
-                    y_sub = torch.cat([proto_y, torch.zeros((b, test_reps.shape[1]), dtype=torch.long, device=device)], dim=1)
+                    # Multi-Draw diversity: noise grows with draw index
+                    # Draw 0 -> sigma=0.00 (pure RAPS)
+                    # Draw 1 -> sigma=0.08 (slight neighborhood exploration)
+                    # Draw 2 -> sigma=0.16 (wider diversity)
+                    noise_scale = 0.08 * d
+                    if noise_scale > 0:
+                        sims = sims + torch.randn_like(sims) * noise_scale
+
+                    _, top_idx = sims.topk(min(M, max_train), dim=-1)               # [B, M]
+                    proto_reps = train_reps.gather(
+                        1, top_idx.unsqueeze(-1).expand(-1, -1, e)
+                    )
+                    proto_y = train_y.gather(1, top_idx) if train_y is not None else None
+
                 else:
-                    y_sub = torch.cat([proto_y, torch.zeros((b, test_reps.shape[1]), dtype=reps.dtype, device=device)], dim=1)
+                    # Edge case: no test rows — fall back to stratified random
+                    perm = _stratified_prototype_indices(
+                        train_y[0] if train_y is not None else None,
+                        M, max_train, device, seed=d * 1000 + 42,
+                    )
+                    proto_reps = train_reps[:, perm, :]
+                    proto_y = train_y[:, perm] if train_y is not None else None
 
-                train_size_sub = torch.full_like(train_size, len(perm))
+                # Assemble sub-context: [M prototypes] + [Q test rows]
+                reps_sub = torch.cat([proto_reps, test_reps], dim=1)
+                n_test = test_reps.shape[1]
+                if icl_module.is_classifier:
+                    y_sub = torch.cat(
+                        [proto_y, torch.zeros((b, n_test), dtype=torch.long, device=device)], dim=1
+                    )
+                else:
+                    y_sub = torch.cat(
+                        [proto_y, torch.zeros((b, n_test), dtype=reps.dtype, device=device)], dim=1
+                    )
+
+                train_size_sub = torch.full_like(train_size, proto_reps.shape[1])
                 out_d = orig_forward(reps_sub, y_sub, train_size_sub, cache=cache, return_cache=return_cache)
                 draw_outputs.append(out_d)
 
-            # Deep in-context variance reduction across draws
+            # Average logits across draws for variance reduction
             if len(draw_outputs) == 1:
                 return draw_outputs[0]
-            
-            # Average output logits/predictions across orthogonal draws
             stacked = torch.stack(draw_outputs, dim=0)
             return torch.mean(stacked, dim=0)
 
@@ -240,6 +319,15 @@ class ZSTabFMModel(AbstractTorchModel):
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
 
+        # Step 3: resolve VRAM config first — everything else is derived from it
+        vram_cfg = _auto_vram_config()
+        logger.info(
+            "[ZSTabFM v2] VRAM config: fit_cap=%d, num_prototypes=%d, device=%s",
+            vram_cfg["fit_cap"],
+            vram_cfg["num_prototypes"],
+            "cuda" if torch.cuda.is_available() else "cpu",
+        )
+
         hps = self._get_model_params()
         device = _resolve_device(
             hps.pop("device", None),
@@ -247,8 +335,9 @@ class ZSTabFMModel(AbstractTorchModel):
             cuda_available=torch.cuda.is_available(),
         )
         interface = hps.pop("interface", "default")
-        num_prototypes = hps.pop("num_prototypes", 512)
-        num_draws = hps.pop("num_draws", 1)
+        # Use VRAM-derived value unless explicitly overridden in hps
+        num_prototypes = hps.pop("num_prototypes", vram_cfg["num_prototypes"])
+        num_draws = hps.pop("num_draws", 3)
 
         self.model = _build_zstabfm_estimator(
             problem_type=self.problem_type,
@@ -258,16 +347,19 @@ class ZSTabFMModel(AbstractTorchModel):
             num_draws=num_draws,
             **hps,
         )
+        # Cache VRAM config so predict methods use the same batch sizes
+        self._vram_cfg = vram_cfg
 
         y_fit = y.to_numpy() if hasattr(y, "to_numpy") else np.array(y)
 
-        # Cap in-context training rows to 1000 stratified prototypes when N > 1000 to prevent CUDA OOM on massive tables
-        if len(X) > 1000:
+        # Cap in-context training rows to VRAM-appropriate fit_cap
+        fit_cap = vram_cfg["fit_cap"]
+        if len(X) > fit_cap:
             try:
                 y_tensor = torch.from_numpy(y_fit) if isinstance(y_fit, np.ndarray) else torch.tensor(y_fit)
                 idx = _stratified_prototype_indices(
                     y_tensor,
-                    M=1000,
+                    M=fit_cap,
                     max_train=len(X),
                     device=torch.device("cpu"),
                     seed=42,
@@ -275,8 +367,8 @@ class ZSTabFMModel(AbstractTorchModel):
                 X_fit = X.iloc[idx] if hasattr(X, "iloc") else X[idx]
                 y_fit = y_fit[idx]
             except Exception:
-                X_fit = X.iloc[:1000] if hasattr(X, "iloc") else X[:1000]
-                y_fit = y_fit[:1000]
+                X_fit = X.iloc[:fit_cap] if hasattr(X, "iloc") else X[:fit_cap]
+                y_fit = y_fit[:fit_cap]
         else:
             X_fit = X
 
@@ -289,6 +381,7 @@ class ZSTabFMModel(AbstractTorchModel):
 
         return self
 
+
     def _preprocess(self, X: pd.DataFrame, is_train: bool = False, **kwargs) -> pd.DataFrame:
         X = super()._preprocess(X, is_train=is_train, **kwargs)
         for col in X.columns:
@@ -296,14 +389,25 @@ class ZSTabFMModel(AbstractTorchModel):
                 X[col] = X[col].astype("category")
         return X
 
+    def _get_batch_size(self, n_cols: int) -> int:
+        """Returns VRAM-appropriate prediction batch size based on column count."""
+        cfg = getattr(self, "_vram_cfg", None) or _auto_vram_config()
+        if n_cols > 100:
+            return cfg["batch_d_large"]
+        elif n_cols > 30:
+            return cfg["batch_d_med"]
+        else:
+            return cfg["batch_d_small"]
+
     def _predict_proba(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
         import torch
         with torch.inference_mode():
             if self.problem_type == "regression":
                 return self._predict_batched(X)
-            
-            n_rows, n_cols = len(X), X.shape[1] if hasattr(X, "shape") else 10
-            batch_size = 128 if n_cols > 100 else (512 if n_cols > 30 else 2048)
+
+            n_rows = len(X)
+            n_cols = X.shape[1] if hasattr(X, "shape") else 10
+            batch_size = self._get_batch_size(n_cols)
 
             if n_rows > batch_size:
                 prob_list = []
@@ -317,7 +421,7 @@ class ZSTabFMModel(AbstractTorchModel):
             else:
                 probs = self.model.predict_proba(X)
 
-        # Temperature calibration and boundary probability clipping
+        # Boundary probability clipping
         eps = 1e-6
         probs = np.clip(probs, eps, 1.0 - eps)
 
@@ -328,8 +432,9 @@ class ZSTabFMModel(AbstractTorchModel):
     def _predict_batched(self, X: pd.DataFrame) -> np.ndarray:
         import torch
         with torch.inference_mode():
-            n_rows, n_cols = len(X), X.shape[1] if hasattr(X, "shape") else 10
-            batch_size = 128 if n_cols > 100 else (512 if n_cols > 30 else 2048)
+            n_rows = len(X)
+            n_cols = X.shape[1] if hasattr(X, "shape") else 10
+            batch_size = self._get_batch_size(n_cols)
 
             if n_rows > batch_size:
                 preds = []
@@ -341,13 +446,16 @@ class ZSTabFMModel(AbstractTorchModel):
                 return np.concatenate(preds, axis=0)
             return self.model.predict(X)
 
+
     def _predict(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
         return self._predict_batched(X)
 
     def _get_default_searchspace(self) -> dict:
+        # Defaults shown here are conservative; _fit overrides num_prototypes
+        # at runtime based on detected GPU VRAM via _auto_vram_config().
         return {
-            "num_prototypes": 1024,
-            "num_draws": 1,
+            "num_prototypes": 512,   # overridden by VRAM auto-scale in _fit
+            "num_draws": 3,          # Multi-Draw RAPS: 3 draws, averaged
             "interface": "default",
         }
 
