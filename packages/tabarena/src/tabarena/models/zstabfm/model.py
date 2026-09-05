@@ -171,9 +171,22 @@ def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512, nu
 
             # Average logits across draws for variance reduction
             if len(draw_outputs) == 1:
-                return draw_outputs[0]
-            stacked = torch.stack(draw_outputs, dim=0)
-            return torch.mean(stacked, dim=0)
+                stacked = draw_outputs[0]
+            else:
+                stacked = torch.mean(torch.stack(draw_outputs, dim=0), dim=0)
+            
+            # CRITICAL FIX: TabFM's wrapper slices the output from index `max_train` to `max_train + Q`.
+            # Our `stacked` tensor has length `M + Q`. If we return it directly, the wrapper will
+            # slice out-of-bounds (empty tensor) when M < max_train.
+            # We must pad the tensor so the test predictions sit exactly at `max_train : max_train + Q`.
+            q_len = test_reps.shape[1]
+            if q_len > 0:
+                final_out = torch.zeros((b, max_train + q_len, stacked.shape[-1]), dtype=stacked.dtype, device=device)
+                test_preds = stacked[:, M:, :]
+                final_out[:, max_train:, :] = test_preds
+                return final_out
+            else:
+                return stacked
 
         return orig_forward(reps, y, train_size, cache=cache, return_cache=return_cache)
 
