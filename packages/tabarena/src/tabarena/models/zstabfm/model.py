@@ -18,42 +18,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Step 3: VRAM Auto-Scaling
-# Detects GPU VRAM at runtime and returns optimal config for the hardware.
-# ---------------------------------------------------------------------------
-
-def _auto_vram_config() -> dict:
-    """Returns optimal config dict based on detected GPU VRAM.
-
-    Tiers:
-      < 5 GB  — RTX 3050 4GB, GTX 1650 4GB
-      < 9 GB  — RTX 3060 8GB, RTX 2080 8GB
-      < 16 GB — RTX 3080 12GB, RTX 4070 12GB
-      >= 16 GB — RTX 4090 24GB, A100 40GB+
-    """
-    if not torch.cuda.is_available():
-        return {"fit_cap": 500, "num_prototypes": 256,
-                "batch_d_large": 64, "batch_d_med": 256, "batch_d_small": 512}
-    try:
-        vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-    except Exception:
-        vram_gb = 4.0
-
-    if vram_gb < 5:
-        # Ultra-safe config for 4GB laptop GPUs to prevent Windows TDR crashes / restarts
-        return {"fit_cap": 800, "num_prototypes": 384,
-                "batch_d_large": 64, "batch_d_med": 128, "batch_d_small": 512}
-    elif vram_gb < 9:
-        return {"fit_cap": 2000, "num_prototypes": 1024,
-                "batch_d_large": 256, "batch_d_med": 1024, "batch_d_small": 2048}
-    elif vram_gb < 16:
-        return {"fit_cap": 3000, "num_prototypes": 1536,
-                "batch_d_large": 512, "batch_d_med": 1536, "batch_d_small": 2048}
-    else:
-        return {"fit_cap": 5000, "num_prototypes": 2048,
-                "batch_d_large": 1024, "batch_d_med": 2048, "batch_d_small": 2048}
-
 
 def _resolve_device(device: str | None, num_gpus: int, *, cuda_available: bool) -> str:
     if device is not None:
@@ -320,15 +284,6 @@ class ZSTabFMModel(AbstractTorchModel):
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
 
-        # Step 3: resolve VRAM config first — everything else is derived from it
-        vram_cfg = _auto_vram_config()
-        logger.info(
-            "[ZSTabFM v2] VRAM config: fit_cap=%d, num_prototypes=%d, device=%s",
-            vram_cfg["fit_cap"],
-            vram_cfg["num_prototypes"],
-            "cuda" if torch.cuda.is_available() else "cpu",
-        )
-
         hps = self._get_model_params()
         device = _resolve_device(
             hps.pop("device", None),
@@ -336,8 +291,7 @@ class ZSTabFMModel(AbstractTorchModel):
             cuda_available=torch.cuda.is_available(),
         )
         interface = hps.pop("interface", "default")
-        # Use VRAM-derived value unless explicitly overridden in hps
-        num_prototypes = hps.pop("num_prototypes", vram_cfg["num_prototypes"])
+        num_prototypes = hps.pop("num_prototypes", 512)
         num_draws = hps.pop("num_draws", 3)
 
         self.model = _build_zstabfm_estimator(
@@ -348,13 +302,11 @@ class ZSTabFMModel(AbstractTorchModel):
             num_draws=num_draws,
             **hps,
         )
-        # Cache VRAM config so predict methods use the same batch sizes
-        self._vram_cfg = vram_cfg
 
         y_fit = y.to_numpy() if hasattr(y, "to_numpy") else np.array(y)
 
-        # Cap in-context training rows to VRAM-appropriate fit_cap
-        fit_cap = vram_cfg["fit_cap"]
+        # Cap in-context training rows to 1000
+        fit_cap = 1000
         if len(X) > fit_cap:
             try:
                 y_tensor = torch.from_numpy(y_fit) if isinstance(y_fit, np.ndarray) else torch.tensor(y_fit)
@@ -390,16 +342,6 @@ class ZSTabFMModel(AbstractTorchModel):
                 X[col] = X[col].astype("category")
         return X
 
-    def _get_batch_size(self, n_cols: int) -> int:
-        """Returns VRAM-appropriate prediction batch size based on column count."""
-        cfg = getattr(self, "_vram_cfg", None) or _auto_vram_config()
-        if n_cols > 100:
-            return cfg["batch_d_large"]
-        elif n_cols > 30:
-            return cfg["batch_d_med"]
-        else:
-            return cfg["batch_d_small"]
-
     def _predict_proba(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
         import torch
         with torch.inference_mode():
@@ -408,7 +350,7 @@ class ZSTabFMModel(AbstractTorchModel):
 
             n_rows = len(X)
             n_cols = X.shape[1] if hasattr(X, "shape") else 10
-            batch_size = self._get_batch_size(n_cols)
+            batch_size = 128 if n_cols > 100 else (512 if n_cols > 30 else 2048)
 
             if n_rows > batch_size:
                 prob_list = []
@@ -435,7 +377,7 @@ class ZSTabFMModel(AbstractTorchModel):
         with torch.inference_mode():
             n_rows = len(X)
             n_cols = X.shape[1] if hasattr(X, "shape") else 10
-            batch_size = self._get_batch_size(n_cols)
+            batch_size = 128 if n_cols > 100 else (512 if n_cols > 30 else 2048)
 
             if n_rows > batch_size:
                 preds = []
@@ -452,11 +394,9 @@ class ZSTabFMModel(AbstractTorchModel):
         return self._predict_batched(X)
 
     def _get_default_searchspace(self) -> dict:
-        # Defaults shown here are conservative; _fit overrides num_prototypes
-        # at runtime based on detected GPU VRAM via _auto_vram_config().
         return {
-            "num_prototypes": 512,   # overridden by VRAM auto-scale in _fit
-            "num_draws": 3,          # Multi-Draw RAPS: 3 draws, averaged
+            "num_prototypes": 512,
+            "num_draws": 3,
             "interface": "default",
         }
 
