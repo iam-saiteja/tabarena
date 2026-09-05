@@ -305,7 +305,7 @@ class ZSTabFMModel(AbstractTorchModel):
         )
         interface = hps.pop("interface", "default")
         num_prototypes = hps.pop("num_prototypes", 512)
-        num_draws = hps.pop("num_draws", 3)
+        num_draws = hps.pop("num_draws", 1)
 
         self.model = _build_zstabfm_estimator(
             problem_type=self.problem_type,
@@ -409,7 +409,7 @@ class ZSTabFMModel(AbstractTorchModel):
     def _get_default_searchspace(self) -> dict:
         return {
             "num_prototypes": 512,
-            "num_draws": 3,
+            "num_draws": 1,
             "interface": "default",
         }
 
