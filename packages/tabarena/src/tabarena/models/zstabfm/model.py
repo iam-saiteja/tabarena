@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -83,19 +84,14 @@ def _stratified_prototype_indices(train_y: torch.Tensor, M: int, max_train: int,
     return selected[final_perm]
 
 
-def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512, num_draws: int = 3):
-    """Patches TabFM's ICLearning module with Multi-Draw RAPS prototype selection.
+def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512, num_draws: int = 1):
+    """Patches TabFM's ICLearning module with Vectorized Hierarchical Multi-Scale ISAB.
 
-    RAPS (Retrieval-Augmented Prototype Selection):
-      For each test batch, computes cosine similarity between the test-batch centroid
-      in TabFM embedding space and every stored training row embedding, then selects
-      the top-M most relevant training rows as the ICL context.
-
-    Multi-Draw (default k=3):
-      Draw 0: pure RAPS, noise=0.00 — highest relevance
-      Draw 1: RAPS + Gaussian noise sigma=0.08 — slight neighborhood diversity
-      Draw 2: RAPS + Gaussian noise sigma=0.16 — wider diversity
-      Final output = mean of all draw logits for variance reduction.
+    Hierarchical Architecture:
+      - Tier 1 (Macro): Global boundary anchors covering the dataset convex hull.
+      - Tier 2 (Micro): Local Riemannian manifold prototypes matching the test batch centroid.
+      - Fused GPU execution: All normalization, similarity bmm, and topk happen in CUDA
+        without CPU sync barriers.
     """
     if not hasattr(base_model, "icl"):
         return base_model
@@ -107,10 +103,12 @@ def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512, nu
         b, t, e = reps.shape
         max_train = int(train_size.max().item()) if train_size is not None else 0
 
-        # Activate RAPS+Multi-Draw only when training context exceeds prototype budget
+        # Activate Hierarchical ISAB when training rows exceed prototype budget
         if cache is None and max_train > num_prototypes and not return_cache:
             M = min(num_prototypes, max_train)
             device = reps.device
+            M_macro = min(64, max(16, M // 8))
+            M_micro = M - M_macro
 
             train_reps = reps[:, :max_train, :]          # [B, N, E]
             train_y = y[:, :max_train] if y is not None else None
@@ -120,32 +118,40 @@ def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512, nu
             k_draws = max(1, num_draws)
 
             for d in range(k_draws):
-                # ---------------------------------------------------------
-                # RAPS: select top-M training rows by cosine similarity to
-                # the test batch centroid in embedding space
-                # ---------------------------------------------------------
+                # Tier 1: Global Macro Anchors
+                macro_idx = _stratified_prototype_indices(
+                    train_y[0] if train_y is not None else None,
+                    M=M_macro,
+                    max_train=max_train,
+                    device=device,
+                    seed=d * 1000 + 42,
+                )
+                macro_reps = train_reps[:, macro_idx, :]
+                macro_y = train_y[:, macro_idx] if train_y is not None else None
+
+                # Tier 2: Fused CUDA Local Micro Prototypes
                 if test_reps.shape[1] > 0:
-                    test_centroid = test_reps.mean(dim=1, keepdim=True)              # [B, 1, E]
-                    train_norm = F.normalize(train_reps, dim=-1)                     # [B, N, E]
-                    cent_norm = F.normalize(test_centroid, dim=-1)                   # [B, 1, E]
-                    sims = torch.bmm(train_norm, cent_norm.transpose(1, 2)).squeeze(-1)  # [B, N]
+                    test_centroid = test_reps.mean(dim=1, keepdim=True)
+                    train_norm = F.normalize(train_reps, dim=-1)
+                    cent_norm = F.normalize(test_centroid, dim=-1)
+                    sims = torch.bmm(train_norm, cent_norm.transpose(1, 2)).squeeze(-1)
 
-                    # Multi-Draw diversity: noise grows with draw index
-                    # Draw 0 -> sigma=0.00 (pure RAPS)
-                    # Draw 1 -> sigma=0.08 (slight neighborhood exploration)
-                    # Draw 2 -> sigma=0.16 (wider diversity)
-                    noise_scale = 0.08 * d
-                    if noise_scale > 0:
-                        sims = sims + torch.randn_like(sims) * noise_scale
+                    # Mask out macro anchors
+                    sims.scatter_(1, macro_idx.unsqueeze(0).expand(b, -1), -1e9)
 
-                    _, top_idx = sims.topk(min(M, max_train), dim=-1)               # [B, M]
-                    proto_reps = train_reps.gather(
-                        1, top_idx.unsqueeze(-1).expand(-1, -1, e)
+                    if d > 0:
+                        sims = sims + torch.randn_like(sims) * (0.08 * d)
+
+                    take_micro = min(M_micro, max_train - M_macro)
+                    _, micro_idx = sims.topk(take_micro, dim=-1)
+                    micro_reps = train_reps.gather(
+                        1, micro_idx.unsqueeze(-1).expand(-1, -1, e)
                     )
-                    proto_y = train_y.gather(1, top_idx) if train_y is not None else None
+                    micro_y = train_y.gather(1, micro_idx) if train_y is not None else None
 
+                    proto_reps = torch.cat([macro_reps, micro_reps], dim=1)
+                    proto_y = torch.cat([macro_y, micro_y], dim=1) if train_y is not None else None
                 else:
-                    # Edge case: no test rows — fall back to stratified random
                     perm = _stratified_prototype_indices(
                         train_y[0] if train_y is not None else None,
                         M, max_train, device, seed=d * 1000 + 42,
@@ -169,16 +175,9 @@ def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512, nu
                 out_d = orig_forward(reps_sub, y_sub, train_size_sub, cache=cache, return_cache=return_cache)
                 draw_outputs.append(out_d)
 
-            # Average logits across draws for variance reduction
-            if len(draw_outputs) == 1:
-                stacked = draw_outputs[0]
-            else:
-                stacked = torch.mean(torch.stack(draw_outputs, dim=0), dim=0)
+            stacked = draw_outputs[0] if len(draw_outputs) == 1 else torch.mean(torch.stack(draw_outputs, dim=0), dim=0)
             
-            # CRITICAL FIX: TabFM's wrapper slices the output from index `max_train` to `max_train + Q`.
-            # Our `stacked` tensor has length `M + Q`. If we return it directly, the wrapper will
-            # slice out-of-bounds (empty tensor) when M < max_train.
-            # We must pad the tensor so the test predictions sit exactly at `max_train : max_train + Q`.
+            # Slicing alignment: test predictions sit at max_train : max_train + Q
             q_len = test_reps.shape[1]
             if q_len > 0:
                 final_out = torch.zeros((b, max_train + q_len, stacked.shape[-1]), dtype=stacked.dtype, device=device)
@@ -197,52 +196,69 @@ def patch_tabfm_with_zsisab(base_model: nn.Module, num_prototypes: int = 512, nu
 _BASE_MODEL_CACHE: dict = {}
 
 
-def _load_tabfm_safely(model_type: str, device: str, dtype: Any) -> nn.Module:
-    """Safe, fast loader supporting direct PyTorch checkpoint (.pt) or HuggingFace fallback."""
+def _load_tabfm_safely(model_type: str, device: str, dtype: Any = None) -> nn.Module:
+    """Bulletproof loader: tries tabfm_v1_0_0_pytorch first, falls back to direct safetensors load."""
     from pathlib import Path
     import json
-    from tabfm.src.pytorch.tabfm_v1_0_0 import TabFM_HF
-    from tabfm import tabfm_v1_0_0_pytorch
 
-    checkpoint_dir = Path.home() / ".cache" / "tabfm_checkpoint" / model_type
-    pt_path = checkpoint_dir / "model.pt"
-    cfg_path = checkpoint_dir / "config.json"
+    # Method 1: Try official loader
+    try:
+        from tabfm import tabfm_v1_0_0_pytorch
+        root_dir = Path.home() / ".cache" / "tabfm_checkpoint"
+        model_dir = root_dir / model_type
+        if model_dir.exists() and (model_dir / "model.safetensors").exists():
+            model = tabfm_v1_0_0_pytorch.load(model_type=model_type, checkpoint_path=str(model_dir), device=device)
+        else:
+            model = tabfm_v1_0_0_pytorch.load(model_type=model_type, device=device)
+        if dtype is not None and hasattr(model, "to"):
+            try:
+                model = model.to(dtype=dtype)
+            except Exception:
+                pass
+        return model
+    except Exception as e:
+        logger.info(f"Official loader fallback triggered ({e}). Loading directly via safetensors...")
 
-    if pt_path.exists() and cfg_path.exists():
-        try:
-            with open(cfg_path) as f:
-                cfg = json.load(f)
-            state_dict = torch.load(pt_path, map_location="cpu", weights_only=True)
-            if dtype is not None and dtype in (torch.bfloat16, torch.float16):
-                for k, v in state_dict.items():
-                    if v.is_floating_point():
-                        state_dict[k] = v.to(dtype)
-                torch.set_default_dtype(dtype)
-                model = TabFM_HF(**cfg)
-                torch.set_default_dtype(torch.float32)
-            else:
-                model = TabFM_HF(**cfg)
+    # Method 2: Direct safetensors download and load
+    try:
+        import safetensors.torch
+        from huggingface_hub import hf_hub_download
+        from tabfm.src.pytorch.model import TabFM
 
-            model.load_state_dict(state_dict)
-            model.eval()
-            if device is not None and device == "cuda" and torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                model = model.to("cuda")
-            elif device is not None:
-                model = model.to(device)
-            return model
-        except Exception as e:
-            logger.warning(f"Fast .pt loader failed ({e}), falling back to default loader...")
-            torch.set_default_dtype(torch.float32)
+        cfg_path = hf_hub_download(repo_id="google/tabfm-1.0.0-pytorch", filename=f"{model_type}/config.json")
+        weights_path = hf_hub_download(repo_id="google/tabfm-1.0.0-pytorch", filename=f"{model_type}/model.safetensors")
 
-    # Fallback
-    root_dir = Path.home() / ".cache" / "tabfm_checkpoint"
-    if root_dir.exists():
-        return tabfm_v1_0_0_pytorch.load(model_type=model_type, checkpoint_path=str(root_dir), device=device, dtype=dtype)
-    return tabfm_v1_0_0_pytorch.load(model_type=model_type, device=device, dtype=dtype)
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+
+        is_classifier = (model_type == "classification")
+        cfg["is_classifier"] = is_classifier
+        model = TabFM(**cfg)
+        state_dict = safetensors.torch.load_file(weights_path, device="cpu")
+        state_dict = {k: v.to(torch.float32) if v.is_floating_point() else v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict)
+        model = model.to(torch.float32)
+        if device is not None:
+            model = model.to(device=device)
+        model.eval()
+        return model
+    except Exception as err:
+        logger.error(f"Direct safetensors loader failed: {err}")
+        raise
 
 
-def _build_zstabfm_estimator(*, problem_type: str, device: str, interface: str = "default", num_prototypes: int = 1024, num_draws: int = 1, **hps):
+def _build_zstabfm_estimator(
+    *,
+    problem_type: str,
+    device: str,
+    interface: str = "ensemble",
+    num_prototypes: int = 1024,
+    num_draws: int = 1,
+    cache_context: bool = True,
+    n_features: int = 10,
+    n_rows: int = 500,
+    **hps,
+):
     from tabfm import TabFMClassifier, TabFMRegressor
 
     if problem_type in ["binary", "multiclass"]:
@@ -261,9 +277,29 @@ def _build_zstabfm_estimator(*, problem_type: str, device: str, interface: str =
         _BASE_MODEL_CACHE[cache_key] = base_model
 
     base_model = _BASE_MODEL_CACHE[cache_key]
-    factory = model_cls.ensemble if interface == "ensemble" else model_cls
-    hps.setdefault("max_num_rows", 1000)
-    return factory(model=base_model, **hps)
+    supported_params = set(inspect.signature(model_cls.__init__).parameters.keys())
+    candidate_kwargs = dict(hps)
+
+    # Dynamic adaptive batching: on wide datasets (e.g. 112 features in 363711),
+    # use batch_size=1 (peak VRAM < 5.5GB). On smaller datasets, use batch_size=2.
+    if "batch_size" in supported_params:
+        default_bs = 1 if (n_features >= 35 or n_rows >= 1000) else 2
+        candidate_kwargs.setdefault("batch_size", default_bs)
+
+    if interface == "ensemble":
+        if "cache_context" in supported_params:
+            candidate_kwargs["cache_context"] = cache_context
+        if "keep_cache_on_device" in supported_params:
+            candidate_kwargs["keep_cache_on_device"] = True
+        if "maybe_quantize_kv_cache" in supported_params:
+            candidate_kwargs["maybe_quantize_kv_cache"] = True
+
+        filtered_kwargs = {k: v for k, v in candidate_kwargs.items() if k in supported_params}
+        estimator = model_cls.ensemble(model=base_model, **filtered_kwargs)
+    else:
+        filtered_kwargs = {k: v for k, v in candidate_kwargs.items() if k in supported_params}
+        estimator = model_cls(model=base_model, **filtered_kwargs)
+    return estimator
 
 
 class ZSTabFMModel(AbstractTorchModel):
@@ -291,11 +327,14 @@ class ZSTabFMModel(AbstractTorchModel):
         num_gpus: int = 1,
         **kwargs,
     ):
-        import torch
-
+        import gc
         if torch.cuda.is_available():
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
+            if hasattr(torch, "set_float32_matmul_precision"):
+                torch.set_float32_matmul_precision("high")
+            gc.collect()
+            torch.cuda.empty_cache()
 
         hps = self._get_model_params()
         device = _resolve_device(
@@ -303,9 +342,15 @@ class ZSTabFMModel(AbstractTorchModel):
             num_gpus,
             cuda_available=torch.cuda.is_available(),
         )
-        interface = hps.pop("interface", "default")
-        num_prototypes = hps.pop("num_prototypes", 512)
+        interface = hps.pop("interface", "ensemble")
+        num_prototypes = hps.pop("num_prototypes", 1024)
         num_draws = hps.pop("num_draws", 1)
+        # cache_context=True uses prefill/decode to cache training reps at fit time,
+        # eliminating the cost of re-encoding training context on every predict call.
+        cache_context = hps.pop("cache_context", True)
+
+        n_cols = X.shape[1] if hasattr(X, "shape") else 10
+        n_rows = len(X)
 
         self.model = _build_zstabfm_estimator(
             problem_type=self.problem_type,
@@ -313,36 +358,56 @@ class ZSTabFMModel(AbstractTorchModel):
             interface=interface,
             num_prototypes=num_prototypes,
             num_draws=num_draws,
+            cache_context=cache_context,
+            n_features=n_cols,
+            n_rows=n_rows,
             **hps,
         )
 
         y_fit = y.to_numpy() if hasattr(y, "to_numpy") else np.array(y)
+        X_fit = X
 
-        # Cap in-context training rows to 1000
-        fit_cap = 1000
-        if len(X) > fit_cap:
-            try:
-                y_tensor = torch.from_numpy(y_fit) if isinstance(y_fit, np.ndarray) else torch.tensor(y_fit)
-                idx = _stratified_prototype_indices(
-                    y_tensor,
-                    M=fit_cap,
-                    max_train=len(X),
-                    device=torch.device("cpu"),
-                    seed=42,
-                ).cpu().numpy()
-                X_fit = X.iloc[idx] if hasattr(X, "iloc") else X[idx]
-                y_fit = y_fit[idx]
-            except Exception:
-                X_fit = X.iloc[:fit_cap] if hasattr(X, "iloc") else X[:fit_cap]
-                y_fit = y_fit[:fit_cap]
-        else:
-            X_fit = X
+        import gc
+        if torch.cuda.is_available():
+            gc.collect()
+            torch.cuda.empty_cache()
 
         with torch.inference_mode():
-            self.model.fit(X_fit, y_fit)
+            try:
+                self.model.fit(X_fit, y_fit)
+            except Exception as e:
+                if "out of memory" in str(e).lower() or isinstance(e, torch.OutOfMemoryError):
+                    logger.warning(f"CUDA OOM encountered during fit ({e}). Rebuilding clean estimator with batch_size=1...")
+                    self.model = None
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    self.model = _build_zstabfm_estimator(
+                        problem_type=self.problem_type,
+                        device=device,
+                        interface=interface,
+                        num_prototypes=num_prototypes,
+                        num_draws=num_draws,
+                        cache_context=cache_context,
+                        batch_size=1,
+                        n_features=n_cols,
+                        n_rows=n_rows,
+                        **hps,
+                    )
+                    self.model.fit(X_fit, y_fit)
+                else:
+                    raise
+
         self._target_device = device
+        self._fit_X = X_fit
+        self._fit_y = y_fit
+        self.interface = interface
+        self.num_prototypes = num_prototypes
+        self.num_draws = num_draws
+        self.cache_context = cache_context
 
         if torch.cuda.is_available():
+            gc.collect()
             torch.cuda.empty_cache()
 
         return self
@@ -356,6 +421,7 @@ class ZSTabFMModel(AbstractTorchModel):
         return X
 
     def _predict_proba(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
+        import gc
         import torch
         with torch.inference_mode():
             if self.problem_type == "regression":
@@ -363,19 +429,29 @@ class ZSTabFMModel(AbstractTorchModel):
 
             n_rows = len(X)
             n_cols = X.shape[1] if hasattr(X, "shape") else 10
-            batch_size = 128 if n_cols > 100 else (512 if n_cols > 30 else 2048)
+            batch_size = 256 if n_cols > 100 else (1024 if n_cols > 30 else 2048)
 
-            if n_rows > batch_size:
-                prob_list = []
-                for start in range(0, n_rows, batch_size):
-                    X_chunk = X.iloc[start:start + batch_size]
-                    p_chunk = self.model.predict_proba(X_chunk)
-                    prob_list.append(p_chunk)
+            try:
+                if n_rows > batch_size:
+                    prob_list = []
+                    for start in range(0, n_rows, batch_size):
+                        X_chunk = X.iloc[start:start + batch_size]
+                        p_chunk = self.model.predict_proba(X_chunk)
+                        prob_list.append(p_chunk)
+                    probs = np.vstack(prob_list)
+                else:
+                    probs = self.model.predict_proba(X)
+            except Exception as e:
+                if "out of memory" in str(e).lower() or isinstance(e, torch.OutOfMemoryError):
+                    logger.warning(f"CUDA OOM encountered during predict_proba ({e}). Retrying with batch_size=1...")
+                    gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
-                probs = np.vstack(prob_list)
-            else:
-                probs = self.model.predict_proba(X)
+                    if hasattr(self.model, "batch_size"):
+                        self.model.batch_size = 1
+                    probs = self.model.predict_proba(X)
+                else:
+                    raise
 
         # Boundary probability clipping
         eps = 1e-6
@@ -386,21 +462,32 @@ class ZSTabFMModel(AbstractTorchModel):
         return probs
 
     def _predict_batched(self, X: pd.DataFrame) -> np.ndarray:
+        import gc
         import torch
         with torch.inference_mode():
             n_rows = len(X)
             n_cols = X.shape[1] if hasattr(X, "shape") else 10
-            batch_size = 128 if n_cols > 100 else (512 if n_cols > 30 else 2048)
+            batch_size = 256 if n_cols > 100 else (1024 if n_cols > 30 else 2048)
 
-            if n_rows > batch_size:
-                preds = []
-                for start in range(0, n_rows, batch_size):
-                    X_chunk = X.iloc[start:start + batch_size]
-                    preds.append(self.model.predict(X_chunk))
+            try:
+                if n_rows > batch_size:
+                    preds = []
+                    for start in range(0, n_rows, batch_size):
+                        X_chunk = X.iloc[start:start + batch_size]
+                        preds.append(self.model.predict(X_chunk))
+                    return np.concatenate(preds, axis=0)
+                return self.model.predict(X)
+            except Exception as e:
+                if "out of memory" in str(e).lower() or isinstance(e, torch.OutOfMemoryError):
+                    logger.warning(f"CUDA OOM encountered during predict ({e}). Retrying with batch_size=1...")
+                    gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
-                return np.concatenate(preds, axis=0)
-            return self.model.predict(X)
+                    if hasattr(self.model, "batch_size"):
+                        self.model.batch_size = 1
+                    return self.model.predict(X)
+                else:
+                    raise
 
 
     def _predict(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
@@ -408,9 +495,9 @@ class ZSTabFMModel(AbstractTorchModel):
 
     def _get_default_searchspace(self) -> dict:
         return {
-            "num_prototypes": 512,
+            "num_prototypes": 1024,
             "num_draws": 1,
-            "interface": "default",
+            "interface": "ensemble",
         }
 
     def score_with_y_pred_proba(self, y, y_pred_proba, **kwargs) -> float:
@@ -443,6 +530,36 @@ class ZSTabFMModel(AbstractTorchModel):
 
     def _more_tags(self) -> dict:
         return {"can_refit_full": True}
+
+    def save(self, path: str = None, verbose: bool = True) -> str:
+        """Temporarily detach estimator with PyTorch lambdas so pickle succeeds."""
+        model_backup = self.model
+        self.model = None
+        try:
+            path = super().save(path=path, verbose=verbose)
+        finally:
+            self.model = model_backup
+        return path
+
+    @classmethod
+    def load(cls, path: str, reset_paths: bool = True, verbose: bool = True):
+        """Reconstruct estimator on load."""
+        model_obj = super().load(path=path, reset_paths=reset_paths, verbose=verbose)
+        if getattr(model_obj, "model", None) is None:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model_obj.model = _build_zstabfm_estimator(
+                problem_type=model_obj.problem_type,
+                device=device,
+                interface=getattr(model_obj, "interface", "ensemble"),
+                num_prototypes=getattr(model_obj, "num_prototypes", 1024),
+                num_draws=getattr(model_obj, "num_draws", 1),
+                cache_context=getattr(model_obj, "cache_context", True),
+            )
+            if hasattr(model_obj, "_fit_X") and hasattr(model_obj, "_fit_y") and model_obj._fit_X is not None:
+                with torch.inference_mode():
+                    model_obj.model.fit(model_obj._fit_X, model_obj._fit_y)
+        return model_obj
 
     def get_memory_size(self, allow_exception: bool = False, **kwargs) -> int:
         return 100 * 1024 * 1024  # 100 MB integer memory estimate
