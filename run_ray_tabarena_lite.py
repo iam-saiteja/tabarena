@@ -8,8 +8,17 @@ import os
 import sys
 import argparse
 import time
+import dataclasses
 from pathlib import Path
 from typing import Any
+
+# Polyfill flax.nnx.dataclass for Ray workers
+try:
+    import flax.nnx as _flax_nnx
+    if not hasattr(_flax_nnx, "dataclass"):
+        _flax_nnx.dataclass = dataclasses.dataclass
+except Exception:
+    pass
 
 # Add local package source directory to sys.path and PYTHONPATH
 pkg_src = str((Path(__file__).parent / "packages" / "tabarena" / "src").resolve())
@@ -29,7 +38,16 @@ def run_job_on_ray_worker(job: Any, expname: str, debug_mode: bool = True) -> li
     """Runs a single TabArena Job on an assigned Ray GPU worker."""
     import sys
     import os
+    import dataclasses
     from pathlib import Path
+    
+    # Polyfill flax.nnx inside the remote Ray worker process
+    try:
+        import flax.nnx as _flax_nnx
+        if not hasattr(_flax_nnx, "dataclass"):
+            _flax_nnx.dataclass = dataclasses.dataclass
+    except Exception:
+        pass
     
     # Ensure worker has pythonpath set
     pkg_path = "/kaggle/working/tabarena/packages/tabarena/src"

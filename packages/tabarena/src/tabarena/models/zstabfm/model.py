@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import warnings
 import inspect
 import logging
+import dataclasses
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-import numpy as np
-import pandas as pd
+# Polyfill for flax.nnx dataclass compatibility across varied Flax versions
+try:
+    import flax.nnx as _flax_nnx
+    if not hasattr(_flax_nnx, "dataclass"):
+        _flax_nnx.dataclass = dataclasses.dataclass
+except Exception:
+    pass
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+import pandas as pd
 
 from autogluon.tabular.models.abstract.abstract_torch_model import AbstractTorchModel
 
@@ -259,7 +269,11 @@ def _build_zstabfm_estimator(
     n_rows: int = 500,
     **hps,
 ):
-    from tabfm import TabFMClassifier, TabFMRegressor
+    try:
+        from tabfm.src.pytorch.classifier import TabFMClassifier
+        from tabfm.src.pytorch.regressor import TabFMRegressor
+    except Exception:
+        from tabfm import TabFMClassifier, TabFMRegressor
 
     if problem_type in ["binary", "multiclass"]:
         model_type, model_cls = "classification", TabFMClassifier
