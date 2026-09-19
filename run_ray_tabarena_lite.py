@@ -11,8 +11,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-# Add source directory
-sys.path.insert(0, str(Path(__file__).parent / "packages" / "tabarena" / "src"))
+# Add local package source directory to sys.path and PYTHONPATH
+pkg_src = str((Path(__file__).parent / "packages" / "tabarena" / "src").resolve())
+if pkg_src not in sys.path:
+    sys.path.insert(0, pkg_src)
+os.environ["PYTHONPATH"] = f"{pkg_src}:{os.environ.get('PYTHONPATH', '')}"
 
 import ray
 from tabarena.benchmark.experiment import TabArenaV0pt1ExperimentBundle
@@ -24,14 +27,24 @@ from tabarena.models.zsisab.info import zsisab_info
 @ray.remote(num_gpus=1)
 def run_job_on_ray_worker(job: Any, expname: str, debug_mode: bool = True) -> list[dict[str, Any]]:
     """Runs a single TabArena Job on an assigned Ray GPU worker."""
+    import sys
+    import os
+    from pathlib import Path
+    
+    # Ensure worker has pythonpath set
+    pkg_path = "/kaggle/working/tabarena/packages/tabarena/src"
+    if os.path.exists(pkg_path) and pkg_path not in sys.path:
+        sys.path.insert(0, pkg_path)
+        
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     
     worker_gpus = ray.get_gpu_ids()
-    task_name = getattr(job, 'task_id', 'job')
+    task_name = getattr(job, "task_id", "job")
     print(f"[*] [Ray Worker GPU {worker_gpus}] Starting {task_name}...", flush=True)
 
     start_time = time.time()
     try:
+        from tabarena.contexts import TabArenaContext
         context = TabArenaContext()
         results = context.run_job(job, expname=expname, register=False, debug_mode=debug_mode)
         elapsed = time.time() - start_time
@@ -54,12 +67,19 @@ def main():
     print(f"RUNNING DISTRIBUTED TABARENA BENCHMARK VIA RAY FOR {args.models.upper()}")
     print("=" * 75)
 
+    runtime_env = {
+        "env_vars": {
+            "PYTHONPATH": pkg_src,
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        }
+    }
+
     try:
-        ray.init(address="auto", ignore_reinit_error=True)
-        print("[+] Attached to live Ray cluster.")
+        ray.init(address="auto", runtime_env=runtime_env, ignore_reinit_error=True)
+        print("[+] Attached to live Ray cluster with runtime_env configured.")
     except Exception:
         print("[*] No existing Ray cluster found. Initializing local Ray instance...")
-        ray.init(ignore_reinit_error=True)
+        ray.init(runtime_env=runtime_env, ignore_reinit_error=True)
 
     cluster_resources = ray.cluster_resources()
     total_cpus = cluster_resources.get("CPU", 0)
