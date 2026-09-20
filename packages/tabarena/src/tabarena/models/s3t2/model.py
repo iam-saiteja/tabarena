@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 """
 S3T2Model: Self-Supervised Test-Time Training for Tabular Data.
 
@@ -100,7 +100,6 @@ class S3T2Model(AbstractTorchModel):
     default_resources_physical_cores_only = True
 
     _default_ag_args_ensemble_extra = {
-        "fold_fitting_strategy": "sequential_local",
         "refit_folds": True,
     }
 
