@@ -1,4 +1,4 @@
-﻿"""
+"""
 Distributed TabArena Lite Benchmark runner using Ray.
 Automatically distributes dataset and fold evaluation jobs across all available GPUs in the Ray cluster.
 """
@@ -31,6 +31,7 @@ from tabarena.benchmark.experiment import TabArenaV0pt1ExperimentBundle
 from tabarena.contexts import TabArenaContext
 from tabarena.models.zstabfm.info import zstabfm_info
 from tabarena.models.zsisab.info import zsisab_info
+from tabarena.models.s3t2.info import s3t2_info
 
 
 @ray.remote(num_gpus=1)
@@ -76,7 +77,7 @@ def run_job_on_ray_worker(job: Any, expname: str, debug_mode: bool = True) -> li
 
 def main():
     parser = argparse.ArgumentParser(description="Run Distributed TabArena benchmark via Ray.")
-    parser.add_argument("--models", type=str, default="zstabfm", choices=["zstabfm", "zsisab"], help="Model to benchmark.")
+    parser.add_argument("--models", type=str, default="s3t2", choices=["s3t2", "zstabfm", "zsisab"], help="Model to benchmark.")
     parser.add_argument("--subset", type=str, default="tiny", help="Dataset subset (e.g., 'tiny', 'all').")
     parser.add_argument("--num-gpus-per-task", type=float, default=1.0, help="Number of GPUs per Ray task.")
     args = parser.parse_args()
@@ -108,7 +109,9 @@ def main():
     cache_dir = output_dir / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.models == "zstabfm":
+    if args.models == "s3t2":
+        target_info = s3t2_info
+    elif args.models == "zstabfm":
         target_info = zstabfm_info
     else:
         target_info = zsisab_info
