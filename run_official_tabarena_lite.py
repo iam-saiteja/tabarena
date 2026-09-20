@@ -15,11 +15,12 @@ from tabarena.benchmark.experiment import TabArenaV0pt1ExperimentBundle
 from tabarena.contexts import TabArenaContext
 from tabarena.models.zstabfm.info import zstabfm_info
 from tabarena.models.zsisab.info import zsisab_info
+from tabarena.models.s3t2.info import s3t2_info
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run TabArena benchmark.")
-    parser.add_argument("--models", type=str, default="zstabfm", choices=["zstabfm", "zsisab"], help="Model to benchmark.")
+    parser.add_argument("--models", type=str, default="s3t2", choices=["s3t2", "zstabfm", "zsisab"], help="Model to benchmark.")
     parser.add_argument("--subset", type=str, default="tiny", help="Dataset subset (e.g., 'tiny', 'all').")
     args = parser.parse_args()
 
@@ -29,7 +30,9 @@ def main():
 
     output_dir = Path(__file__).parent / f"tabarena_{args.subset}_results"
 
-    if args.models == "zstabfm":
+    if args.models == "s3t2":
+        target_info = s3t2_info
+    elif args.models == "zstabfm":
         target_info = zstabfm_info
     else:
         target_info = zsisab_info

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from tabarena.models.tabicl.model import TabICLModel, TabICLv2Model
     from tabarena.models.tabm.model import TabMModel
     from tabarena.models.tabpfn_3.model import TabPFN3Model
+    from tabarena.models.s3t2.model import S3T2Model
     from tabarena.models.tabpfnv2_5.model import RealTabPFNv25Model, TabPFNv26Model
     from tabarena.models.tabpfnwide.model import TabPFNWideModel
     from tabarena.models.tabstar.model import TabSTARModel
@@ -53,6 +54,7 @@ _LAZY_CLASSES: dict[str, str] = {
     "RealMLPModel": "tabarena.models.realmlp.model",
     "RealTabPFNv25Model": "tabarena.models.tabpfnv2_5.model",
     "SAPRPTOSSModel": "tabarena.models.sap_rpt_oss.model",
+    "S3T2Model": "tabarena.models.s3t2.model",
     "TabDPTModel": "tabarena.models.tabdpt.model",
     "TabDPTTurboModel": "tabarena.models.tabdpt.model",
     "TabFMModel": "tabarena.models.tabfm.model",
