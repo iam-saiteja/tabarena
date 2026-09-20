@@ -9,12 +9,6 @@ Architecture:
   2. Manifold Mixup + Hard Boundary Mining: augmentation in hidden space
   3. Multi-Resolution Ensemble: 3 networks (tiny/medium/large)
   4. Temperature calibration: Platt scaling on training data
-
-Theoretical path to 2000+ Elo vs TabFM (1945):
-  - Captures feature-level non-linearities via tokenization
-  - Enforces smooth decision boundaries via manifold mixup
-  - Reduces variance via multi-resolution ensemble
-  - Immune to pretrain distribution shift (learns purely from given dataset)
 """
 
 import gc
@@ -40,11 +34,6 @@ warnings.filterwarnings("ignore")
 # ─────────────────────────────────────────────────────────────────────────────
 
 class FeatureTokenizer(nn.Module):
-    """
-    Upgrade 1: Per-feature scalar -> embed_dim vector.
-    e_d = W_d * x_d + b_d  for each feature d.
-    A CLS token is prepended for global context aggregation.
-    """
     def __init__(self, n_features: int, embed_dim: int = 32):
         super().__init__()
         self.W = nn.Parameter(torch.randn(n_features, embed_dim) * 0.02)
@@ -52,7 +41,6 @@ class FeatureTokenizer(nn.Module):
         self.cls = nn.Parameter(torch.randn(1, 1, embed_dim) * 0.02)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, D) -> tokens: (B, D+1, E)
         tok = x.unsqueeze(-1) * self.W.unsqueeze(0) + self.b.unsqueeze(0)
         cls = self.cls.expand(x.size(0), -1, -1)
         return torch.cat([cls, tok], dim=1)
@@ -75,7 +63,6 @@ class ResidualBlock(nn.Module):
 
 
 class S3T2Net(nn.Module):
-    """Single resolution network for the ensemble."""
     def __init__(self, n_features: int, n_classes: int, hidden: int, depth: int, embed_dim: int = 32):
         super().__init__()
         self.tokenizer = FeatureTokenizer(n_features, embed_dim)
@@ -93,7 +80,6 @@ class S3T2Net(nn.Module):
         h = self.proj(h)
         for i, blk in enumerate(self.blocks):
             h = blk(h)
-            # Upgrade 2: Manifold Mixup at a random hidden layer
             if mixup_layer == i and mixup_lam is not None and perm is not None:
                 h = mixup_lam * h + (1 - mixup_lam) * h[perm]
         return self.head(h)
@@ -104,19 +90,13 @@ class S3T2Net(nn.Module):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class S3T2Model(AbstractTorchModel):
-    """
-    S3T2: Self-Supervised Test-Time Training.
-
-    Pure from-scratch. Fully self-contained. No pretrained weights.
-    Trains 3 small networks in <30s on GPU, <120s on CPU.
-    """
     ag_key = "TA-S3T2"
     ag_name = "TA-S3T2"
     ag_priority = 86
     seed_name = "random_state"
     _supported_problem_types = ["binary", "multiclass", "regression"]
     default_num_gpus = 1
-    minimum_num_gpus = 0  # Can run on CPU too
+    minimum_num_gpus = 0
     default_resources_physical_cores_only = True
 
     _default_ag_args_ensemble_extra = {
@@ -129,16 +109,28 @@ class S3T2Model(AbstractTorchModel):
             return torch.device("cuda")
         return torch.device("cpu")
 
+    def get_device(self) -> str:
+        if hasattr(self, "_nets") and self._nets is not None:
+            param = next(self._nets.parameters(), None)
+            if param is not None:
+                return str(param.device)
+        return "cpu"
+
+    def _set_device(self, device: str):
+        if hasattr(self, "_nets") and self._nets is not None:
+            self._nets.to(device)
+            self._device = str(device)
+
     def _fit(self, X: pd.DataFrame, y: pd.Series, num_cpus: int = 1, num_gpus: int = 1, **kwargs):
         torch.set_num_threads(max(1, num_cpus))
         hps = self._get_model_params()
         device = self._get_device(num_gpus)
 
-        steps      = hps.pop("steps",      400)
-        lr         = hps.pop("lr",         3e-3)
-        embed_dim  = hps.pop("embed_dim",  32)
+        steps       = hps.pop("steps", 400)
+        lr          = hps.pop("lr", 3e-3)
+        embed_dim   = hps.pop("embed_dim", 32)
         mixup_alpha = hps.pop("mixup_alpha", 0.3)
-        hard_ratio = hps.pop("hard_ratio", 0.4)
+        hard_ratio  = hps.pop("hard_ratio", 0.4)
 
         # Preprocessing
         self._le = LabelEncoder()
@@ -154,18 +146,24 @@ class S3T2Model(AbstractTorchModel):
 
         self._is_clf = is_clf
         self._qt = QuantileTransformer(output_distribution="normal", random_state=42)
-        X_t = self._qt.fit_transform(X.to_numpy().astype(np.float32))
+        
+        X_clean = self._preprocess(X, is_train=True)
+        X_t = self._qt.fit_transform(X_clean.to_numpy().astype(np.float32))
         n_features = X_t.shape[1]
 
         Xt = torch.tensor(X_t, device=device)
-        yt = torch.tensor(y_enc, dtype=torch.long if is_clf else torch.float32, device=device)
+        if is_clf:
+            yt = torch.tensor(y_enc, dtype=torch.long, device=device)
+        else:
+            yt = torch.tensor(y_enc, dtype=torch.float32, device=device).view(-1, 1)
 
-        # Upgrade 3: 3 resolution networks
+        # 3 resolution networks
         configs = [(64, 2), (128, 3), (256, 4)]
         self._nets = nn.ModuleList([
             S3T2Net(n_features, n_classes if is_clf else 1, h, d, embed_dim)
             for h, d in configs
         ]).to(device)
+        self.model = self._nets  # Expose to AutoGluon
 
         opt = torch.optim.AdamW(self._nets.parameters(), lr=lr, weight_decay=1e-4)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=steps)
@@ -192,7 +190,6 @@ class S3T2Model(AbstractTorchModel):
                     lg = net(Xt, mixup_layer=ml, mixup_lam=lam, perm=perm)
                     loss = -(ym * F.log_softmax(lg, -1)).sum(-1).mean()
 
-                    # Hard boundary cross-class pairs
                     if len(unique_classes) > 1:
                         hi, hj = [], []
                         for _ in range(nh):
@@ -212,9 +209,8 @@ class S3T2Model(AbstractTorchModel):
                             lgh = net(Xh)
                             loss = loss + 0.5 * -(yh * F.log_softmax(lgh, -1)).sum(-1).mean()
                 else:
-                    # Regression: MSE with mixup targets
                     ym_reg = lam * yt + (1 - lam) * yt[perm]
-                    lg = net(Xt, mixup_layer=ml, mixup_lam=lam, perm=perm).squeeze(-1)
+                    lg = net(Xt, mixup_layer=ml, mixup_lam=lam, perm=perm)
                     loss = F.mse_loss(lg, ym_reg)
 
                 total_loss = total_loss + loss
@@ -224,7 +220,7 @@ class S3T2Model(AbstractTorchModel):
             opt.step()
             sched.step()
 
-        # Temperature calibration
+        # Calibration
         self._nets.eval()
         with torch.no_grad():
             lg_cal = self._ensemble_logits(Xt)
@@ -252,15 +248,19 @@ class S3T2Model(AbstractTorchModel):
 
     def _preprocess(self, X: pd.DataFrame, is_train: bool = False, **kwargs) -> pd.DataFrame:
         X = super()._preprocess(X, is_train=is_train, **kwargs)
+        X = X.copy()
         for col in X.columns:
             if X[col].dtype == object or isinstance(X[col].dtype, pd.CategoricalDtype):
                 X[col] = X[col].astype("category").cat.codes.astype(np.float32)
-        return X
+            elif not np.issubdtype(X[col].dtype, np.number):
+                X[col] = pd.to_numeric(X[col], errors="coerce").fillna(0).astype(np.float32)
+        return X.fillna(0)
 
     def _predict_proba(self, X: pd.DataFrame, **kwargs) -> np.ndarray:
         device = torch.device(self._device)
+        X_clean = self._preprocess(X)
         Xt = torch.tensor(
-            self._qt.transform(X.to_numpy().astype(np.float32)), device=device
+            self._qt.transform(X_clean.to_numpy().astype(np.float32)), device=device
         )
         self._nets.eval()
         with torch.inference_mode():
@@ -280,7 +280,15 @@ class S3T2Model(AbstractTorchModel):
             if proba.ndim == 1:  # binary
                 return (proba > 0.5).astype(int)
             return proba.argmax(axis=1)
-        return self._predict_proba(X)
+        else:
+            device = torch.device(self._device)
+            X_clean = self._preprocess(X)
+            Xt = torch.tensor(
+                self._qt.transform(X_clean.to_numpy().astype(np.float32)), device=device
+            )
+            self._nets.eval()
+            with torch.inference_mode():
+                return self._ensemble_logits(Xt).squeeze(-1).cpu().numpy()
 
     def _get_default_searchspace(self) -> dict:
         return {
@@ -295,7 +303,7 @@ class S3T2Model(AbstractTorchModel):
         return {"can_refit_full": True}
 
     def get_memory_size(self, allow_exception: bool = False, **kwargs) -> int:
-        return 50 * 1024 * 1024  # 50MB estimate
+        return 50 * 1024 * 1024
 
     def _estimate_memory_usage(self, X: pd.DataFrame, **kwargs) -> int:
         return 50 * 1024 * 1024
