@@ -1,0 +1,1245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TabArena win-rate matrix</title>
+<style>
+  :root {
+        --fam-foundation: #b07cf0;
+    --fam-nn: #5aa9e6;
+    --fam-tree: #5cb85c;
+    --fam-system: #f0a35a;
+    --fam-baseline: #9e9e9e;
+    --fam-other: #9e9e9e;
+    --paper: #ffffff;
+    --card: #ffffff;
+    --ink: #14161a;
+    --muted: #6d6c65;
+    --line: #e4e3db;
+    --accent: #2a78d6;
+    --chip-bg: #f2f1ec;
+    --pt-muted: #b9b8b1;
+    /* The same family hues as *text*. The mark colors are tuned for fills and
+    drop below readable contrast as small labels on the light surface, so
+    light mode darkens them; dark mode reuses the mark colors as-is. */
+    --fam-foundation-ink: #7d3fc2;
+    --fam-nn-ink: #1c6fa8;
+    --fam-tree-ink: #2f7d32;
+    /* The one family that does not darken for the light surface: a mid orange taken to the
+    lightness the others use reads as brown, and any tone dark enough to gain contrast stops
+    matching the swatch beside it. The static paper figures print system names in the family
+    colour itself, so this does too, and the two agree. */
+    --fam-system-ink: var(--fam-system);
+    --fam-baseline-ink: #5f5f5f;
+    --fam-other-ink: #5f5f5f;
+    /* Tuning-variant series (default / tuned / tuned + ensembled). Light mode
+    is the paper view's surface, so it uses the *static figures' own* seaborn
+    pastels — figures exported from here drop straight into a paper beside
+    them. The cost is colorblind separation: green vs. orange is 4.0 deutan
+    ΔE, well inside the band that needs secondary encoding, which here is the
+    fixed concentric bar widths plus the legend and the data table. Dark mode
+    (the website) keeps the stepped, better-separated version below. */
+    --var-default: #a1c9f4;
+    --var-tuned: #ffb482;
+    --var-tunedens: #8de5a1;
+    /* Systems are not a tuning variant, so they sit outside the blue -> orange -> green
+    progression rather than inside it. Everything else in that chart already claims a hue:
+    orange reads as Tuned, green as Tuned + Ens., blue as Default, and purple as the
+    Foundation Model family, whose colour the method names below the axis are set in — which
+    rules out magenta too, close enough to that purple to be read as it. Wine is far from all
+    of them and dark enough to hold its own weight; a system bar is never nested inside
+    another, so it does not have to stay light to keep one legible. */
+    --var-system: #f2aac6;
+    --optimal: #228b22;
+    --tooltip-bg: #14161a;
+    --tooltip-ink: #fbfbf9;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #131316;
+      --card: #1b1b1f;
+      --ink: #f0efea;
+      --muted: #9b9a92;
+      --line: #2e2e33;
+      --accent: #3987e5;
+      --chip-bg: #232327;
+      --pt-muted: #55555c;
+      --fam-foundation-ink: var(--fam-foundation);
+      --fam-nn-ink: var(--fam-nn);
+      --fam-tree-ink: var(--fam-tree);
+      --fam-system-ink: var(--fam-system);
+      --fam-baseline-ink: var(--fam-baseline);
+      --fam-other-ink: var(--fam-other);
+      --var-default: #4386d5;
+      --var-tuned: #c05f38;
+      --var-tunedens: #289972;
+      --var-system: #b04a72;
+      --optimal: #2ea043;
+      --tooltip-bg: #f0efea;
+      --tooltip-ink: #14161a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #131316;
+    --card: #1b1b1f;
+    --ink: #f0efea;
+    --muted: #9b9a92;
+    --line: #2e2e33;
+    --accent: #3987e5;
+    --chip-bg: #232327;
+    --pt-muted: #55555c;
+    --fam-foundation-ink: var(--fam-foundation);
+    --fam-nn-ink: var(--fam-nn);
+    --fam-tree-ink: var(--fam-tree);
+    --fam-system-ink: var(--fam-system);
+    --fam-baseline-ink: var(--fam-baseline);
+    --fam-other-ink: var(--fam-other);
+    --var-default: #4386d5;
+    --var-tuned: #c05f38;
+    --var-tunedens: #289972;
+    --var-system: #b04a72;
+    --optimal: #2ea043;
+    --tooltip-bg: #f0efea;
+    --tooltip-ink: #14161a;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --paper: #ffffff;
+    --card: #ffffff;
+    --ink: #14161a;
+    --muted: #6d6c65;
+    --line: #e4e3db;
+    --accent: #2a78d6;
+    --chip-bg: #f2f1ec;
+    --pt-muted: #b9b8b1;
+    /* The same family hues as *text*. The mark colors are tuned for fills and
+    drop below readable contrast as small labels on the light surface, so
+    light mode darkens them; dark mode reuses the mark colors as-is. */
+    --fam-foundation-ink: #7d3fc2;
+    --fam-nn-ink: #1c6fa8;
+    --fam-tree-ink: #2f7d32;
+    /* The one family that does not darken for the light surface: a mid orange taken to the
+    lightness the others use reads as brown, and any tone dark enough to gain contrast stops
+    matching the swatch beside it. The static paper figures print system names in the family
+    colour itself, so this does too, and the two agree. */
+    --fam-system-ink: var(--fam-system);
+    --fam-baseline-ink: #5f5f5f;
+    --fam-other-ink: #5f5f5f;
+    /* Tuning-variant series (default / tuned / tuned + ensembled). Light mode
+    is the paper view's surface, so it uses the *static figures' own* seaborn
+    pastels — figures exported from here drop straight into a paper beside
+    them. The cost is colorblind separation: green vs. orange is 4.0 deutan
+    ΔE, well inside the band that needs secondary encoding, which here is the
+    fixed concentric bar widths plus the legend and the data table. Dark mode
+    (the website) keeps the stepped, better-separated version below. */
+    --var-default: #a1c9f4;
+    --var-tuned: #ffb482;
+    --var-tunedens: #8de5a1;
+    /* Systems are not a tuning variant, so they sit outside the blue -> orange -> green
+    progression rather than inside it. Everything else in that chart already claims a hue:
+    orange reads as Tuned, green as Tuned + Ens., blue as Default, and purple as the
+    Foundation Model family, whose colour the method names below the axis are set in — which
+    rules out magenta too, close enough to that purple to be read as it. Wine is far from all
+    of them and dark enough to hold its own weight; a system bar is never nested inside
+    another, so it does not have to stay light to keep one legible. */
+    --var-system: #f2aac6;
+    --optimal: #228b22;
+    --tooltip-bg: #14161a;
+    --tooltip-ink: #fbfbf9;
+    color-scheme: light;
+  }
+  html, body { margin: 0; background: var(--paper); }
+  /* The colour emoji fonts are named *before* the generic `sans-serif`. A generic
+     family matches every character through the browser's own fallback chain, so
+     anything listed after it is unreachable — and that fallback resolves emoji to
+     a monochrome font on Linux, which flattens the family symbols on the chips.
+     Latin glyphs are unaffected: the emoji fonts carry none. */
+  body {
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI",
+      "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    line-height: 1.5;
+    padding: 10px 12px 14px;
+  }
+  /* The [hidden] attribute must beat author display rules (e.g. the
+     inline-flex on .metricpick), else hidden controls render empty. */
+  [hidden] { display: none !important; }
+
+  .explorer-title { font-size: 15px; font-weight: 650; margin: 0 0 8px; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 10px; }
+  .controls .hint { font-size: 12.5px; color: var(--muted); }
+  .btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn {
+    font: 600 12.5px/1 system-ui, sans-serif; color: var(--ink);
+    background: var(--chip-bg); border: 1px solid var(--line); border-radius: 7px;
+    padding: 6px 11px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--muted); }
+  .btn:focus-visible, .chip:focus-visible, .famchip:focus-visible, select:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .metricpick { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+  .metricpick select {
+    font: 600 12.5px/1.2 system-ui, sans-serif; color: var(--ink);
+    background: var(--chip-bg); border: 1px solid var(--line); border-radius: 7px;
+    padding: 5px 7px; cursor: pointer;
+  }
+
+  .chips { display: flex; flex-direction: column; gap: 9px; }
+  /* One block per family: the family toggle on top, its chips wrapping below. */
+  .chiprow { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+  .famchip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font: 650 10.5px/1.3 system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); background: var(--chip-bg); border: 1px dashed var(--line);
+    border-radius: 999px; padding: 5px 10px; cursor: pointer;
+  }
+  .famchip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fam); flex: none; }
+  .famchip .count { font-weight: 500; letter-spacing: 0; opacity: 0.75; }
+  /* The family symbol sits at text size, not the chip's small-caps size. */
+  .famchip .sym { font-size: 1.05em; letter-spacing: 0; }
+  .famchip:hover { border-color: var(--fam); color: var(--ink); }
+  .famchip[aria-pressed="true"] {
+    border: 1px solid var(--fam);
+    background: color-mix(in srgb, var(--fam) 13%, transparent);
+    color: var(--ink);
+  }
+  /* A toggle button that carries its own colour: off is faded with a neutral
+     border, on takes the colour as border and tint. Opt-in via `.toggle` so the
+     older explorers, which fade their variant buttons with inline styles, are
+     unaffected. */
+  .btn.toggle[aria-pressed] { opacity: 0.5; }
+  .btn.toggle[aria-pressed="true"] {
+    opacity: 1;
+    border-color: var(--fam);
+    background: color-mix(in srgb, var(--fam) 18%, var(--chip-bg));
+  }
+  .btn.toggle .swatch {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--fam); margin-right: 6px; vertical-align: middle;
+  }
+  .btn.toggle[aria-pressed="false"] .swatch { background: var(--pt-muted); }
+  .grouplabel { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+
+  .chipset { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font: 500 12.5px/1 system-ui, sans-serif; color: var(--ink);
+    background: none; border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 10px 5px 8px; cursor: pointer;
+  }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pt-muted); flex: none; }
+  .chip .imp-mark { color: var(--muted); font-weight: 700; margin-left: -2px; }
+  .chip[aria-pressed="true"] { border-color: var(--fam); background: color-mix(in srgb, var(--fam) 13%, transparent); font-weight: 650; }
+  .chip[aria-pressed="true"] .dot { background: var(--fam); }
+  .chip:hover { border-color: var(--muted); }
+
+  .legendstrip {
+    display: flex; flex-wrap: wrap; gap: 5px 16px; align-items: center;
+    font-size: 12.5px; color: var(--muted); padding: 2px 2px 8px;
+  }
+  .legendstrip .item { display: inline-flex; align-items: center; gap: 6px; }
+
+  .tooltip {
+    position: absolute; pointer-events: none; display: none;
+    background: var(--tooltip-bg); color: var(--tooltip-ink);
+    border-radius: 8px; padding: 8px 11px; font-size: 12px; line-height: 1.45;
+    max-width: 260px; z-index: 5; font-variant-numeric: tabular-nums;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  }
+  .tooltip .t-name { font-weight: 700; font-size: 12.5px; }
+  .tooltip .t-var { opacity: 0.75; }
+  .tooltip .t-imp { opacity: 0.85; font-style: italic; }
+
+  details.datatable { margin-top: 8px; font-size: 12.5px; }
+  details.datatable summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+  details.datatable .tblwrap { overflow-x: auto; margin-top: 8px; }
+  details.datatable table { border-collapse: collapse; font-variant-numeric: tabular-nums; min-width: 560px; }
+  details.datatable th, details.datatable td {
+    text-align: left; padding: 3px 12px 3px 0; border-bottom: 1px solid var(--line);
+  }
+  details.datatable th { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+
+  svg text {
+    font-family: system-ui, -apple-system, "Segoe UI",
+      "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .chip, .btn, .famchip { transition: border-color 120ms ease, background-color 120ms ease; }
+  }
+
+  /* --- Paper view -----------------------------------------------------------
+     A figure-ready state for slides and papers: white surface, and only the
+     things needed to read the plot — the caption, the legend and the chart.
+     The controls, the chip list and the data table are interactive scaffolding,
+     not part of the figure. Entered via the "Paper view" button (which stamps
+     data-theme="light" on the root, see the scopes above). */
+  /* One toggle, in the same place in both states and never hidden — an exit
+     tucked into a corner of the figure was easy to miss. */
+  .viewbar { display: flex; align-items: center; gap: 10px; margin: 0 0 9px; }
+  body.paper .controls,
+  body.paper .chips,
+  body.paper .sidebox,
+  body.paper details.datatable { display: none !important; }
+  body.paper { padding: 14px 18px 18px; }
+  /* Export controls, revealed with the paper view. */
+  .exportbar { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+  .exportbar .hint { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+
+
+  /* The matrix scrolls in both directions: 40+ models will not fit a page either
+     way, and shrinking the cells to fit makes the numbers unreadable. `margin:
+     auto` centres it once the selection is small enough to fit — and collapses
+     to zero when it overflows, which `justify-content: center` would not. */
+  .wr-scroll {
+    overflow: auto; max-width: 100%;
+    scrollbar-width: thin; scrollbar-color: var(--pt-muted) transparent;
+  }
+  .wr-scroll::-webkit-scrollbar { width: 11px; height: 11px; }
+  .wr-scroll::-webkit-scrollbar-thumb {
+    background: var(--pt-muted); border-radius: 8px;
+    border: 3px solid transparent; background-clip: content-box;
+  }
+  #chart { display: block; margin-inline: auto; }
+  .wr-empty { padding: 40px 0; text-align: center; color: var(--muted); font-size: 13px; }
+  .chips-head { flex: 1 1 100%; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .chips { margin: 2px 0 10px; flex-direction: row; flex-wrap: wrap; gap: 12px 28px; align-items: flex-start; }
+  .chiprow { flex: 0 1 auto; min-width: 0; }
+</style>
+</head>
+<body>
+  <div class="viewbar">
+    <button class="btn" id="btn-paper" title="White background, matrix only — for slides and papers">Paper view</button>
+  </div>
+  <p class="explorer-title" id="title"></p>
+  <div class="controls">
+    <button class="btn toggle" id="btn-best"
+      title="Keep only each model's best-performing variant, one row and column per model — as the static figure does">One per model</button>
+    <span class="grouplabel">Variants</span>
+    <div class="btnrow" id="variant-btns"></div>
+    <label class="metricpick">Order
+      <select id="order-select">
+        <option value="published">As published</option>
+        <option value="winrate">Mean win rate</option>
+        <option value="name">Name</option>
+      </select>
+    </label>
+    <label class="metricpick">Size
+      <select id="zoom-select" title="Fit scales the whole matrix into the panel; the percentages draw it at reading size and scroll">
+        <option value="fit">Fit panel</option>
+        <option value="0.6">60%</option>
+        <option value="0.8">80%</option>
+        <option value="1">100%</option>
+      </select>
+    </label>
+    <span class="hint">Click a row or column label to remove that model</span>
+  </div>
+  <div class="exportbar" id="exportbar" hidden>
+    <span class="hint">Export figure</span>
+    <button class="btn" id="btn-svg" title="Download as SVG — vector, keeps text selectable">Download SVG</button>
+    <button class="btn" id="btn-pdf" title="Download as a one-page PDF">Download PDF</button>
+    <button class="btn" id="btn-png" title="Download as PNG at 3x scale">Download PNG</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="wr-scroll" id="wrap">
+    <svg id="chart" role="img" aria-label="Pairwise win-rate matrix"></svg>
+  </div>
+  <div class="tooltip"></div>
+
+<script>
+(function () {
+  "use strict";
+  const CONFIG = {"title": null, "methods": ["TabFM (default)", "TabFM+", "[New] TA-ZSTABFM (default)", "AutoGluon 1.6 (noncommercial, 4h)", "AutoGluon 1.6 (extreme, 4h)", "EXAONE-Tabular (default)", "TabPFN-3 (default)", "TabICLv2 (default)", "RealTabPFN-2.5 (default)", "TabPFN-2.6 (default)", "RealTabPFN-2.5 (T+E)", "AutoGluon 1.5 (extreme, 4h)", "RealTabPFN-2.5 (tuned)", "RealMLP (T+E)", "TabDPT (T+E)", "TabPFNv2 (T+E)", "TabDPT (tuned)", "TabDPT-Turbo (default)", "Mitra (default)", "AutoGluon 1.4 (best, 4h)", "TabDPT (default)", "TabPFNv2 (default)", "RealMLP (tuned)", "LimiX (default)", "TabSwift (default)", "TabM (T+E)", "CatBoost (tuned)", "TabM (tuned)", "TabPFNv2 (tuned)", "CatBoost (T+E)", "SAP-RPT-OSS (default)", "iLTM (T+E)", "RealMLP (default)", "xRFM (T+E)", "EBM (T+E)", "LightGBM (T+E)", "CatBoost (default)", "xRFM (tuned)", "TabICL (default)", "XGBoost (T+E)", "iLTM (tuned)", "TabM (default)", "XGBoost (tuned)", "EBM (default)", "EBM (tuned)", "ChimeraBoost (T+E)", "ModernNCA (default)", "ModernNCA (tuned)", "BetaTabPFN (default)", "LightGBM (tuned)", "FastaiMLP (T+E)", "TorchMLP (T+E)", "ModernNCA (T+E)", "ExtraTrees (T+E)", "TorchMLP (tuned)", "TabSTAR (T+E)", "TabSTAR (tuned)", "ChimeraBoost (tuned)", "ExtraTrees (tuned)", "Nori-30M (default)", "Nori (default)", "ChimeraBoost (default)", "FastaiMLP (tuned)", "PerpetualBooster (T+E)", "OrionMSP (default)", "TabFlex (default)", "RandomForest (T+E)", "TabSTAR (default)", "xRFM (default)", "RandomForest (tuned)", "PerpetualBooster (tuned)", "TorchMLP (default)", "PerpetualBooster (default)", "XGBoost (default)", "ExtraTrees (default)", "iLTM (default)", "LightGBM (default)", "FastaiMLP (default)", "Linear (T+E)", "KNN (T+E)", "RandomForest (default)", "Linear (tuned)", "Linear (default)", "KNN (tuned)", "KNN (default)"], "matrix": [[NaN, 0.5556, 0.5, 0.7778, 0.7222, 0.8889, 0.7778, 0.8333, 0.8333, 0.8889, 0.8333, 0.8333, 0.8889, 0.9444, 1.0, 0.9444, 1.0, 0.9444, 1.0, 1.0, 1.0, 0.9444, 0.9444, 0.9444, 0.9444, 0.9444, 0.9444, 1.0, 1.0, 1.0, 0.8889, 1.0, 0.8889, 1.0, 0.9444, 1.0, 0.9444, 1.0, 0.9444, 1.0, 1.0, 0.9444, 0.9444, 0.9444, 0.9444, 1.0, 0.9444, 1.0, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0, 1.0, 0.8889, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0], [0.4444, NaN, 0.6667, 0.7222, 0.7222, 0.7778, 0.8889, 0.7778, 0.8333, 0.9444, 0.8333, 0.9444, 0.8889, 0.8889, 1.0, 1.0, 1.0, 0.8889, 0.9444, 0.8889, 0.9444, 0.8333, 0.9444, 0.8889, 0.8889, 0.9444, 0.9444, 1.0, 1.0, 1.0, 0.8889, 0.9444, 0.9444, 0.9444, 0.9444, 1.0, 0.9444, 1.0, 0.9444, 1.0, 0.9444, 0.9444, 1.0, 0.9444, 0.9444, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0, 1.0, 0.9444, 0.9444, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 0.9444, 1.0, 1.0, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], [0.5, 0.3333, NaN, 0.7778, 0.7778, 0.6667, 0.8333, 0.7778, 0.8333, 0.7222, 0.7778, 0.8889, 0.8333, 0.8889, 0.8889, 0.8889, 0.8889, 0.8889, 0.9444, 0.8889, 0.8889, 0.8333, 0.9444, 0.9444, 0.8889, 0.8889, 0.9444, 0.8889, 0.9444, 0.8889, 0.8333, 1.0, 0.9444, 0.9444, 0.9444, 1.0, 0.9444, 0.9444, 0.9444, 1.0, 1.0, 0.9444, 1.0, 0.8889, 0.9444, 0.9444, 1.0, 1.0, 0.9444, 1.0, 0.8889, 1.0, 1.0, 1.0, 1.0, 0.9444, 0.9444, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9444, 0.8889, 1.0, 0.9444, 1.0, 0.9444, 1.0, 1.0, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0], [0.2222, 0.2778, 0.2222, NaN, 0.6111, 0.7222, 0.7778, 0.7778, 0.8333, 0.7778, 0.8333, 0.8333, 0.8889, 0.7778, 0.9444, 0.8889, 0.8889, 0.9444, 1.0, 0.8889, 0.9444, 0.8333, 0.8333, 0.8889, 0.9444, 0.8889, 0.8889, 0.8889, 0.9444, 0.8333, 0.7778, 1.0, 0.8333, 1.0, 0.8889, 1.0, 0.8889, 0.9444, 0.9444, 1.0, 1.0, 0.8889, 0.9444, 0.8889, 0.9444, 1.0, 0.9444, 0.9444, 0.8333, 1.0, 0.8889, 0.9444, 1.0, 1.0, 0.9444, 0.8333, 0.8333, 1.0, 1.0, 1.0, 1.0, 0.9444, 0.9444, 0.9444, 1.0, 1.0, 0.9444, 0.8333, 1.0, 0.9444, 1.0, 0.9444, 0.8889, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0], [0.2778, 0.2778, 0.2222, 0.3889, NaN, 0.6111, 0.5556, 0.8333, 0.8333, 0.7222, 0.7222, 0.8333, 0.8333, 0.7778, 0.8889, 0.8889, 0.8889, 0.9444, 0.8889, 0.9444, 0.9444, 0.8333, 0.7778, 0.8889, 0.9444, 0.8333, 0.8889, 0.8333, 0.9444, 0.8333, 0.7778, 1.0, 0.7778, 0.9444, 0.8889, 1.0, 0.8889, 0.9444, 1.0, 1.0, 1.0, 0.8889, 0.9444, 0.8889, 0.9444, 1.0, 0.9444, 0.9444, 0.8333, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 0.8889, 0.8889, 1.0, 1.0, 0.9444, 1.0, 0.9444, 1.0, 0.9444, 1.0, 1.0, 0.9444, 0.8889, 1.0, 0.9444, 1.0, 1.0, 0.8889, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0], [0.1111, 0.2222, 0.3333, 0.2778, 0.3889, NaN, 0.5, 0.5556, 0.6667, 0.6667, 0.5556, 0.5556, 0.7222, 0.8333, 0.6667, 0.7778, 0.7222, 0.7778, 0.8333, 0.8333, 0.6667, 0.7222, 0.9444, 0.7778, 0.8333, 0.8889, 0.9444, 0.8889, 0.9444, 1.0, 0.8333, 0.9444, 0.8333, 0.9444, 0.8889, 0.9444, 1.0, 0.8333, 0.8889, 0.9444, 0.9444, 0.9444, 0.9444, 0.8333, 0.8889, 1.0, 0.9444, 0.9444, 0.9444, 0.9722, 0.8333, 0.9444, 1.0, 0.9444, 0.9444, 0.8333, 0.8333, 1.0, 0.9444, 0.7778, 0.7778, 1.0, 0.8333, 1.0, 1.0, 0.8889, 1.0, 0.8333, 0.9444, 1.0, 1.0, 0.9444, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0], [0.2222, 0.1111, 0.1667, 0.2222, 0.4444, 0.5, NaN, 0.5556, 0.5, 0.6667, 0.5833, 0.6667, 0.7222, 0.7222, 0.7778, 0.8333, 0.9444, 0.8889, 0.8333, 0.7222, 0.8889, 0.7222, 0.7778, 0.7778, 0.8889, 0.8333, 0.7778, 0.8889, 0.9444, 0.8889, 0.7222, 0.8889, 0.8333, 0.9444, 0.6667, 1.0, 0.8889, 0.9444, 0.8889, 0.8889, 0.8333, 0.8333, 0.8333, 0.8333, 0.8333, 0.9444, 0.9444, 0.8889, 0.9444, 1.0, 0.8333, 0.9444, 1.0, 1.0, 0.9444, 0.8333, 0.8333, 0.9444, 1.0, 0.9444, 0.9444, 0.9444, 0.8889, 0.9444, 1.0, 0.8889, 0.9444, 0.8333, 1.0, 1.0, 1.0, 0.9444, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 1.0], [0.1667, 0.2222, 0.2222, 0.2222, 0.1667, 0.4444, 0.4444, NaN, 0.5556, 0.5556, 0.5, 0.5556, 0.6667, 0.6667, 0.7778, 0.6667, 0.8333, 0.8333, 0.7222, 0.7778, 0.7778, 0.7222, 0.7222, 0.7778, 0.8333, 0.7222, 0.7778, 0.7778, 0.7778, 0.8333, 0.7778, 0.8889, 0.7778, 0.8333, 0.7778, 0.9444, 0.8333, 0.9444, 0.8889, 0.8889, 0.8333, 0.8333, 0.8889, 0.8333, 0.7778, 0.9444, 0.8889, 0.8889, 0.8889, 0.9444, 1.0, 0.9444, 1.0, 0.8889, 0.9444, 0.8333, 0.8333, 1.0, 0.9444, 0.7778, 0.7778, 0.8889, 0.9444, 1.0, 0.9444, 1.0, 0.9444, 0.8333, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 0.9444, 1.0, 0.9444, 1.0, 1.0, 1.0], [0.1667, 0.1667, 0.1667, 0.1667, 0.1667, 0.3333, 0.5, 0.4444, NaN, 0.3333, 0.4444, 0.6111, 0.4444, 0.6667, 0.7222, 0.5556, 0.7222, 0.7778, 0.7222, 0.8333, 0.7778, 0.8889, 0.7222, 0.7778, 0.8889, 0.8333, 0.8333, 0.8333, 0.9444, 0.8333, 0.7222, 0.7778, 0.7222, 0.9444, 0.7778, 0.9444, 0.8889, 0.9444, 0.6667, 0.8889, 0.9167, 0.8333, 0.8889, 0.8889, 0.8889, 0.9444, 0.9444, 0.8333, 0.8333, 0.9444, 0.9444, 1.0, 0.9444, 0.8889, 0.8889, 0.8333, 0.8333, 0.9444, 0.8889, 0.7778, 0.8333, 0.9444, 1.0, 0.8889, 1.0, 1.0, 0.9444, 0.8889, 0.8889, 1.0, 1.0, 1.0, 0.8889, 1.0, 1.0, 0.9444, 1.0, 1.0, 0.9444, 0.9444, 1.0, 0.9444, 1.0, 1.0, 1.0], [0.1111, 0.0556, 0.2778, 0.2222, 0.2778, 0.3333, 0.3333, 0.4444, 0.6667, NaN, 0.4444, 0.4444, 0.4444, 0.6667, 0.6667, 0.7222, 0.6667, 0.7222, 0.8333, 0.6667, 0.6111, 0.7222, 0.7778, 0.7778, 0.8333, 0.7222, 0.7778, 0.7778, 0.9444, 0.8333, 0.7778, 0.8889, 0.7778, 0.8889, 0.7778, 0.9444, 0.8889, 0.8333, 0.8333, 0.8889, 0.8889, 0.7778, 0.9444, 0.7778, 0.8889, 0.9444, 0.9444, 0.8889, 0.8889, 1.0, 0.8333, 0.9444, 0.9444, 0.8889, 0.9444, 0.7778, 0.7778, 0.9444, 0.8889, 0.8333, 0.8889, 0.9444, 0.8333, 0.9444, 0.9444, 0.8333, 0.9444, 0.7778, 0.9444, 0.9444, 1.0, 0.9444, 0.9444, 1.0, 0.9444, 0.9444, 1.0, 0.9444, 0.9444, 1.0, 1.0, 0.9444, 0.9444, 1.0, 1.0], [0.1667, 0.1667, 0.2222, 0.1667, 0.2778, 0.4444, 0.4167, 0.5, 0.5556, 0.5556, NaN, 0.5556, 0.6111, 0.7222, 0.6667, 0.8333, 0.6667, 0.6667, 0.7778, 0.6667, 0.6111, 0.7778, 0.8333, 0.7778, 0.7778, 0.7222, 0.8889, 0.7778, 0.9444, 0.8889, 0.8333, 0.8333, 0.7222, 0.8333, 0.7778, 0.8889, 0.8889, 0.9444, 0.6667, 0.8889, 0.8333, 0.8333, 0.8333, 0.8333, 0.8333, 0.8889, 0.8333, 0.8889, 0.8889, 0.9444, 0.7778, 0.8889, 1.0, 0.9444, 0.8333, 0.7778, 0.7778, 0.8889, 0.9444, 0.8333, 0.8889, 0.8333, 0.8333, 0.8889, 1.0, 0.7778, 0.9444, 0.8333, 0.9444, 0.9444, 0.9444, 0.8889, 0.8889, 1.0, 1.0, 0.8889, 1.0, 0.9444, 0.8889, 0.9444, 1.0, 0.9444, 0.8889, 0.9444, 1.0], [0.1667, 0.0556, 0.1111, 0.1667, 0.1667, 0.4444, 0.3333, 0.4444, 0.3889, 0.5556, 0.4444, NaN, 0.6111, 0.7778, 0.7222, 0.6667, 0.8333, 0.5556, 0.8333, 0.7778, 0.6667, 0.6667, 0.7778, 0.7778, 0.7222, 0.7778, 0.7778, 0.7222, 0.8333, 0.7778, 0.6667, 0.8333, 0.7778, 1.0, 0.7222, 0.8889, 0.8889, 0.8889, 0.7778, 0.8889, 0.8889, 0.8333, 0.8889, 0.8333, 0.8333, 0.9444, 0.9444, 0.9444, 0.7778, 0.9444, 0.8333, 0.8889, 0.9444, 0.9444, 0.8889, 0.7778, 0.8333, 0.9444, 0.9444, 0.7222, 0.8333, 0.8889, 0.8889, 0.8333, 1.0, 0.8889, 0.9444, 0.8333, 1.0, 0.9444, 0.8889, 0.8889, 0.8889, 0.9444, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 0.9444, 0.9444, 0.9444, 1.0, 1.0], [0.1111, 0.1111, 0.1667, 0.1111, 0.1667, 0.2778, 0.2778, 0.3333, 0.5556, 0.5556, 0.3889, 0.3889, NaN, 0.5556, 0.6111, 0.5833, 0.6111, 0.5556, 0.7778, 0.6667, 0.5556, 0.6667, 0.7778, 0.6667, 0.7222, 0.8333, 0.7222, 0.8889, 0.8889, 0.8333, 0.7222, 0.7222, 0.7222, 0.7778, 0.7222, 0.8889, 0.8889, 0.8889, 0.7778, 0.9444, 0.8889, 0.8333, 0.8889, 0.7778, 0.7778, 0.8889, 0.8889, 0.9444, 0.8889, 1.0, 0.7778, 0.8889, 0.8889, 1.0, 0.8889, 0.6667, 0.7222, 0.8889, 1.0, 0.7778, 0.8333, 0.8889, 0.8333, 0.8889, 1.0, 0.7778, 1.0, 0.8333, 0.8889, 0.9444, 0.9444, 0.8889, 0.8889, 1.0, 1.0, 0.8889, 1.0, 0.8889, 0.8889, 0.9444, 1.0, 0.8889, 0.8889, 0.9444, 1.0], [0.0556, 0.1111, 0.1111, 0.2222, 0.2222, 0.1667, 0.2778, 0.3333, 0.3333, 0.3333, 0.2778, 0.2222, 0.4444, NaN, 0.4444, 0.4444, 0.4444, 0.5556, 0.5556, 0.6111, 0.5556, 0.5, 0.5, 0.5, 0.6111, 0.7222, 0.7222, 0.7778, 0.6111, 0.8333, 0.6111, 0.7778, 0.7778, 0.6667, 0.7222, 0.8889, 0.8889, 0.7222, 0.6667, 0.9444, 0.8333, 0.7778, 0.9444, 0.7778, 0.7778, 0.8889, 0.8889, 0.7778, 0.8333, 0.8889, 0.8333, 0.8333, 0.8333, 0.8333, 0.7778, 0.6667, 0.6667, 0.9444, 0.8889, 0.7222, 0.7222, 0.9444, 0.8333, 0.9444, 0.8889, 0.7778, 0.8333, 0.7778, 0.8333, 0.8889, 0.9444, 0.8889, 0.9444, 1.0, 1.0, 0.9444, 1.0, 0.9444, 0.9444, 0.9444, 1.0, 0.9444, 0.9444, 1.0, 1.0], [0.0, 0.0, 0.1111, 0.0556, 0.1111, 0.3333, 0.2222, 0.2222, 0.2778, 0.3333, 0.3333, 0.2778, 0.3889, 0.5556, NaN, 0.5, 0.7222, 0.3889, 0.5556, 0.6667, 0.5556, 0.5556, 0.7222, 0.6667, 0.6667, 0.5556, 0.6667, 0.5556, 0.7778, 0.7222, 0.7222, 0.7778, 0.7222, 0.7778, 0.6667, 0.7778, 0.7778, 0.8889, 0.7222, 0.8889, 0.8889, 0.7778, 0.8889, 0.8333, 0.7222, 0.8333, 0.8333, 0.7778, 0.6667, 0.8333, 0.7778, 0.7778, 0.8889, 0.8889, 0.7778, 0.7222, 0.7778, 0.8889, 0.9444, 0.7222, 0.7222, 0.7778, 0.8333, 0.7778, 1.0, 0.8889, 0.8889, 0.8333, 0.9444, 0.8333, 0.8333, 0.8333, 0.8333, 0.9444, 1.0, 0.8889, 0.9444, 1.0, 0.9444, 1.0, 0.9444, 0.9444, 0.8889, 1.0, 1.0], [0.0556, 0.0, 0.1111, 0.1111, 0.1111, 0.2222, 0.1667, 0.3333, 0.4444, 0.2778, 0.1667, 0.3333, 0.4167, 0.5556, 0.5, NaN, 0.5556, 0.4444, 0.6111, 0.6667, 0.4444, 0.6667, 0.6667, 0.5556, 0.6111, 0.6667, 0.7222, 0.6667, 0.7778, 0.7222, 0.6667, 0.7222, 0.7222, 0.7778, 0.7222, 0.8333, 0.7222, 0.7778, 0.6667, 0.8889, 0.7778, 0.7222, 0.8333, 0.7778, 0.7778, 0.7222, 0.7222, 0.7222, 0.7222, 0.8889, 0.7778, 0.8333, 0.8333, 0.7778, 0.8333, 0.6111, 0.6667, 0.7778, 0.8333, 0.8333, 0.8889, 0.8333, 0.8333, 0.8333, 0.8333, 0.7778, 0.8889, 0.7778, 0.8333, 0.8889, 0.9444, 0.8889, 0.8889, 1.0, 0.9444, 0.8889, 1.0, 0.9444, 0.9444, 0.8889, 1.0, 0.9444, 0.8889, 0.9444, 1.0], [0.0, 0.0, 0.1111, 0.1111, 0.1111, 0.2778, 0.0556, 0.1667, 0.2778, 0.3333, 0.3333, 0.1667, 0.3889, 0.5556, 0.2778, 0.4444, NaN, 0.5556, 0.6667, 0.6111, 0.6111, 0.5, 0.6667, 0.6667, 0.7222, 0.5556, 0.6667, 0.6111, 0.6667, 0.7222, 0.6111, 0.7778, 0.7778, 0.7222, 0.6667, 0.7778, 0.7778, 0.7222, 0.7778, 0.8333, 0.8333, 0.7778, 0.8333, 0.7222, 0.6667, 0.7778, 0.8889, 0.8333, 0.7222, 0.8333, 0.6667, 0.7778, 0.8333, 0.8333, 0.8333, 0.7222, 0.7778, 0.8333, 0.9444, 0.6111, 0.6111, 0.8889, 0.8889, 0.7778, 1.0, 0.7778, 0.8333, 0.8333, 0.8889, 0.8889, 0.8889, 0.8889, 0.8889, 0.9444, 0.9444, 0.9444, 0.9444, 1.0, 0.8889, 0.9444, 0.8889, 0.8889, 0.8889, 1.0, 0.9444], [0.0556, 0.1111, 0.1111, 0.0556, 0.0556, 0.2222, 0.1111, 0.1667, 0.2222, 0.2778, 0.3333, 0.4444, 0.4444, 0.4444, 0.6111, 0.5556, 0.4444, NaN, 0.5556, 0.6111, 0.5556, 0.4444, 0.7222, 0.6111, 0.6389, 0.5, 0.6667, 0.5, 0.7222, 0.7222, 0.7222, 0.6667, 0.6667, 0.7778, 0.7222, 0.6667, 0.7778, 0.7778, 0.6667, 0.7222, 0.8333, 0.7222, 0.7222, 0.8333, 0.7222, 0.7778, 0.6667, 0.7778, 0.6667, 0.7222, 0.7778, 0.8333, 0.7222, 0.8889, 0.7778, 0.6667, 0.7222, 0.8333, 0.8889, 0.6667, 0.6667, 0.8333, 0.8889, 0.7778, 0.9444, 0.9444, 0.8889, 0.7778, 0.8889, 0.8889, 0.8889, 0.8889, 0.8889, 0.9444, 1.0, 0.9444, 1.0, 1.0, 0.9444, 1.0, 0.9444, 0.9444, 0.9444, 1.0, 1.0], [0.0, 0.0556, 0.0556, 0.0, 0.1111, 0.1667, 0.1667, 0.2778, 0.2778, 0.1667, 0.2222, 0.1667, 0.2222, 0.4444, 0.4444, 0.3889, 0.3333, 0.4444, NaN, 0.5556, 0.4444, 0.5, 0.5, 0.5556, 0.5556, 0.6667, 0.6111, 0.6111, 0.5556, 0.6111, 0.5, 0.7778, 0.7222, 0.7778, 0.6667, 0.7778, 0.8333, 0.7778, 0.6667, 0.8333, 0.8333, 0.8333, 0.8333, 0.7222, 0.7778, 0.8889, 0.9444, 0.8889, 0.7778, 1.0, 0.7778, 0.7778, 0.9444, 0.8333, 0.8889, 0.7222, 0.7222, 0.8333, 0.8889, 0.7222, 0.7222, 0.8889, 0.7778, 0.8889, 0.9167, 0.8333, 0.8333, 0.8333, 0.8889, 0.9444, 0.8889, 0.8333, 0.8889, 0.9444, 0.8889, 0.8889, 1.0, 0.8889, 0.9444, 1.0, 1.0, 0.9444, 0.9444, 1.0, 1.0], [0.0, 0.1111, 0.1111, 0.1111, 0.0556, 0.1667, 0.2778, 0.2222, 0.1667, 0.3333, 0.3333, 0.2222, 0.3333, 0.3889, 0.3333, 0.3333, 0.3889, 0.3889, 0.4444, NaN, 0.5, 0.5556, 0.5556, 0.4444, 0.4444, 0.4444, 0.5556, 0.6667, 0.5556, 0.6667, 0.5, 0.6667, 0.6667, 0.7222, 0.5556, 0.8333, 0.6667, 0.7222, 0.6111, 0.7778, 0.6667, 0.6667, 0.6667, 0.7778, 0.7778, 0.8333, 0.8333, 0.7222, 0.7778, 0.8889, 0.8333, 0.8889, 0.8333, 0.8333, 0.8889, 0.6111, 0.6111, 0.8333, 0.8333, 0.7222, 0.7778, 0.8889, 0.8889, 0.8889, 0.8333, 0.8889, 0.8889, 0.7778, 0.8333, 0.9444, 0.9444, 0.9444, 0.9444, 0.9444, 1.0, 0.9444, 1.0, 0.9444, 0.9444, 0.9444, 1.0, 0.9444, 1.0, 1.0, 1.0], [0.0, 0.0556, 0.1111, 0.0556, 0.0556, 0.3333, 0.1111, 0.2222, 0.2222, 0.3889, 0.3889, 0.3333, 0.4444, 0.4444, 0.4444, 0.5556, 0.3889, 0.4444, 0.5556, 0.5, NaN, 0.5, 0.6111, 0.6111, 0.6667, 0.5556, 0.7222, 0.5556, 0.6111, 0.7222, 0.6111, 0.6667, 0.5556, 0.6667, 0.6111, 0.7222, 0.7222, 0.7222, 0.6111, 0.7222, 0.7778, 0.7222, 0.7778, 0.7222, 0.6667, 0.7778, 0.8333, 0.7778, 0.6111, 0.7778, 0.7222, 0.7222, 0.7778, 0.7778, 0.7222, 0.6667, 0.6667, 0.7778, 0.8889, 0.6111, 0.6111, 0.8333, 0.8889, 0.7778, 0.8889, 0.7778, 0.8333, 0.7778, 0.7778, 0.8333, 0.8889, 0.8333, 0.8333, 0.8889, 0.9444, 0.9444, 0.9444, 0.9444, 0.7778, 0.9444, 0.8333, 0.8333, 0.8889, 1.0, 0.9444], [0.0556, 0.1667, 0.1667, 0.1667, 0.1667, 0.2778, 0.2778, 0.2778, 0.1111, 0.2778, 0.2222, 0.3333, 0.3333, 0.5, 0.4444, 0.3333, 0.5, 0.5556, 0.5, 0.4444, 0.5, NaN, 0.5, 0.6111, 0.6111, 0.6667, 0.6111, 0.6667, 0.6111, 0.6667, 0.5556, 0.5, 0.5556, 0.6667, 0.6667, 0.7222, 0.7222, 0.7222, 0.6111, 0.7222, 0.5556, 0.6667, 0.7222, 0.7222, 0.6667, 0.7778, 0.7222, 0.6667, 0.8333, 0.7778, 0.6667, 0.6667, 0.6111, 0.7778, 0.7222, 0.6111, 0.6111, 0.8333, 0.8333, 0.6667, 0.7222, 0.7778, 0.7778, 0.8333, 0.8333, 0.8889, 0.8333, 0.6667, 0.7778, 0.8889, 0.8333, 0.8333, 0.8889, 0.8889, 0.8889, 0.9444, 0.9444, 0.8889, 0.9444, 0.8889, 0.9444, 0.9444, 1.0, 1.0, 1.0], [0.0556, 0.0556, 0.0556, 0.1667, 0.2222, 0.0556, 0.2222, 0.2778, 0.2778, 0.2222, 0.1667, 0.2222, 0.2222, 0.5, 0.2778, 0.3333, 0.3333, 0.2778, 0.5, 0.4444, 0.3889, 0.5, NaN, 0.4167, 0.3889, 0.5556, 0.6111, 0.6111, 0.4444, 0.6111, 0.5, 0.6111, 0.6111, 0.5, 0.7222, 0.7222, 0.7222, 0.6667, 0.6111, 0.7778, 0.7222, 0.7778, 0.7778, 0.6667, 0.7222, 0.7778, 0.7222, 0.8333, 0.8333, 0.7778, 0.7222, 0.7222, 0.7222, 0.7222, 0.7778, 0.7222, 0.6667, 0.8889, 0.7778, 0.7222, 0.7222, 0.7778, 0.7222, 0.8889, 0.75, 0.7222, 0.8333, 0.7222, 0.8889, 0.8889, 0.8889, 0.9444, 0.9444, 0.9444, 0.8889, 0.9444, 0.9444, 0.8889, 0.8889, 0.9444, 1.0, 0.9167, 0.8889, 1.0, 1.0], [0.0556, 0.1111, 0.0556, 0.1111, 0.1111, 0.2222, 0.2222, 0.2222, 0.2222, 0.2222, 0.2222, 0.2222, 0.3333, 0.5, 0.3333, 0.4444, 0.3333, 0.3889, 0.4444, 0.5556, 0.3889, 0.3889, 0.5833, NaN, 0.4444, 0.5556, 0.5, 0.5556, 0.5, 0.5556, 0.4444, 0.6389, 0.6667, 0.5556, 0.6667, 0.6667, 0.6667, 0.7778, 0.5, 0.6111, 0.7222, 0.6667, 0.6667, 0.7778, 0.7778, 0.7222, 0.7222, 0.7778, 0.6667, 0.7778, 0.6667, 0.6667, 0.7778, 0.8333, 0.6111, 0.7222, 0.75, 0.6667, 0.7778, 0.7222, 0.7222, 0.7778, 0.7778, 0.7778, 0.8056, 0.7222, 0.8889, 0.8333, 0.8333, 0.8889, 0.7778, 0.8889, 0.8333, 0.8889, 0.8889, 0.7778, 0.8889, 0.8889, 0.8889, 0.9444, 0.8889, 0.8889, 0.9444, 0.9444, 1.0], [0.0556, 0.1111, 0.1111, 0.0556, 0.0556, 0.1667, 0.1111, 0.1667, 0.1111, 0.1667, 0.2222, 0.2778, 0.2778, 0.3889, 0.3333, 0.3889, 0.2778, 0.3611, 0.4444, 0.5556, 0.3333, 0.3889, 0.6111, 0.5556, NaN, 0.5, 0.6111, 0.4444, 0.5556, 0.6111, 0.7222, 0.6111, 0.6667, 0.7222, 0.6667, 0.5556, 0.6111, 0.7778, 0.5, 0.6111, 0.7222, 0.6667, 0.6111, 0.7778, 0.7222, 0.7222, 0.7222, 0.7222, 0.6667, 0.6111, 0.8333, 0.6667, 0.6111, 0.7222, 0.7778, 0.6667, 0.6667, 0.6667, 0.7222, 0.6111, 0.6111, 0.7778, 0.8333, 0.7778, 0.8889, 0.9444, 0.7778, 0.7778, 0.7778, 0.7778, 0.8333, 0.8889, 0.8889, 0.7778, 0.8889, 0.9444, 1.0, 1.0, 0.8889, 0.9444, 0.8889, 0.8889, 0.9444, 1.0, 1.0], [0.0556, 0.0556, 0.1111, 0.1111, 0.1667, 0.1111, 0.1667, 0.2778, 0.1667, 0.2778, 0.2778, 0.2222, 0.1667, 0.2778, 0.4444, 0.3333, 0.4444, 0.5, 0.3333, 0.5556, 0.4444, 0.3333, 0.4444, 0.4444, 0.5, NaN, 0.4444, 0.5, 0.4444, 0.5556, 0.5, 0.5556, 0.6667, 0.6667, 0.6111, 0.6111, 0.6667, 0.5556, 0.7222, 0.6667, 0.6111, 0.7778, 0.7222, 0.6111, 0.7222, 0.7222, 0.7222, 0.6667, 0.7222, 0.7222, 0.7222, 0.7222, 0.7778, 0.7222, 0.7222, 0.7222, 0.7778, 0.7778, 0.7222, 0.6111, 0.6111, 0.7778, 0.7778, 0.7222, 0.8333, 0.8333, 0.7778, 0.7778, 0.8333, 0.7778, 0.8889, 0.9444, 0.8889, 0.8889, 0.8333, 0.8333, 0.9444, 0.8889, 0.8889, 0.8889, 0.8889, 0.8889, 0.8889, 1.0, 1.0], [0.0556, 0.0556, 0.0556, 0.1111, 0.1111, 0.0556, 0.2222, 0.2222, 0.1667, 0.2222, 0.1111, 0.2222, 0.2778, 0.2778, 0.3333, 0.2778, 0.3333, 0.3333, 0.3889, 0.4444, 0.2778, 0.3889, 0.3889, 0.5, 0.3889, 0.5556, NaN, 0.5556, 0.4444, 0.6111, 0.4444, 0.5, 0.5556, 0.5, 0.7222, 0.7222, 0.75, 0.6111, 0.5556, 0.7222, 0.7778, 0.6667, 0.7222, 0.7222, 0.7222, 0.6667, 0.6667, 0.6667, 0.7222, 0.8333, 0.7222, 0.8333, 0.7778, 0.7222, 0.7778, 0.6111, 0.6667, 0.7222, 0.6667, 0.7222, 0.7222, 0.7778, 0.7778, 0.7778, 0.7222, 0.7222, 0.8889, 0.6667, 0.7778, 1.0, 0.8333, 0.8889, 0.8889, 1.0, 0.8333, 0.9444, 1.0, 0.8333, 0.9444, 0.9444, 1.0, 0.9444, 0.9444, 1.0, 1.0], [0.0, 0.0, 0.1111, 0.1111, 0.1667, 0.1111, 0.1111, 0.2222, 0.1667, 0.2222, 0.2222, 0.2778, 0.1111, 0.2222, 0.4444, 0.3333, 0.3889, 0.5, 0.3889, 0.3333, 0.4444, 0.3333, 0.3889, 0.4444, 0.5556, 0.5, 0.4444, NaN, 0.3889, 0.5, 0.5, 0.5, 0.5556, 0.6111, 0.6111, 0.6111, 0.6667, 0.5556, 0.7222, 0.7222, 0.6111, 0.7778, 0.7222, 0.5556, 0.6667, 0.8333, 0.6667, 0.6667, 0.7222, 0.7222, 0.6111, 0.7222, 0.7778, 0.7222, 0.7778, 0.6667, 0.7222, 0.8889, 0.7222, 0.6667, 0.6667, 0.8333, 0.7778, 0.8333, 0.7778, 0.8333, 0.7778, 0.7778, 0.7778, 0.8333, 0.8889, 0.9444, 0.8889, 0.8889, 0.7778, 0.8333, 1.0, 0.8333, 0.8889, 0.8889, 0.9444, 0.8889, 0.9444, 1.0, 1.0], [0.0, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.2222, 0.0556, 0.0556, 0.0556, 0.1667, 0.1111, 0.3889, 0.2222, 0.2222, 0.3333, 0.2778, 0.4444, 0.4444, 0.3889, 0.3889, 0.5556, 0.5, 0.4444, 0.5556, 0.5556, 0.6111, NaN, 0.5556, 0.5278, 0.5556, 0.6111, 0.6667, 0.6667, 0.7222, 0.6667, 0.6667, 0.6111, 0.7222, 0.6667, 0.7222, 0.7222, 0.7222, 0.6667, 0.6667, 0.6111, 0.7222, 0.7222, 0.7778, 0.6667, 0.7778, 0.6667, 0.7778, 0.7778, 0.6111, 0.6111, 0.7778, 0.7778, 0.6667, 0.6667, 0.7778, 0.7222, 0.7778, 0.8333, 0.8333, 0.7778, 0.7222, 0.8333, 0.8889, 0.8333, 0.8333, 0.8333, 0.9444, 0.9444, 0.8889, 0.9444, 0.8889, 0.9444, 0.9444, 0.9444, 0.9444, 0.8889, 1.0, 1.0], [0.0, 0.0, 0.1111, 0.1667, 0.1667, 0.0, 0.1111, 0.1667, 0.1667, 0.1667, 0.1111, 0.2222, 0.1667, 0.1667, 0.2778, 0.2778, 0.2778, 0.2778, 0.3889, 0.3333, 0.2778, 0.3333, 0.3889, 0.4444, 0.3889, 0.4444, 0.3889, 0.5, 0.4444, NaN, 0.5, 0.5556, 0.5556, 0.3889, 0.5556, 0.5, 0.6667, 0.5556, 0.6111, 0.6667, 0.6667, 0.6111, 0.6667, 0.6667, 0.6667, 0.7222, 0.6111, 0.6667, 0.6667, 0.7222, 0.7222, 0.7778, 0.7778, 0.7778, 0.7778, 0.6111, 0.6111, 0.7778, 0.7778, 0.7222, 0.7222, 0.8333, 0.7778, 0.8333, 0.6667, 0.6667, 0.9444, 0.6667, 0.7778, 1.0, 0.8333, 0.8889, 0.8889, 0.9444, 0.8889, 0.9444, 1.0, 0.8333, 0.9444, 0.8889, 1.0, 0.9444, 0.9444, 1.0, 1.0], [0.1111, 0.1111, 0.1667, 0.2222, 0.2222, 0.1667, 0.2778, 0.2222, 0.2778, 0.2222, 0.1667, 0.3333, 0.2778, 0.3889, 0.2778, 0.3333, 0.3889, 0.2778, 0.5, 0.5, 0.3889, 0.4444, 0.5, 0.5556, 0.2778, 0.5, 0.5556, 0.5, 0.4722, 0.5, NaN, 0.5, 0.6111, 0.5556, 0.5, 0.6111, 0.6111, 0.5, 0.6111, 0.6667, 0.6111, 0.5556, 0.6667, 0.6111, 0.6667, 0.6667, 0.6667, 0.6111, 0.6667, 0.6667, 0.7778, 0.7222, 0.7222, 0.6111, 0.7222, 0.5556, 0.5556, 0.7222, 0.6667, 0.5556, 0.5556, 0.7222, 0.6667, 0.8333, 0.6667, 0.7222, 0.7778, 0.7778, 0.7778, 0.7778, 0.8333, 0.7778, 0.7778, 0.8333, 0.7778, 0.7778, 0.8333, 0.8333, 0.8333, 0.7222, 0.8333, 0.8333, 0.8333, 0.8889, 1.0], [0.0, 0.0556, 0.0, 0.0, 0.0, 0.0556, 0.1111, 0.1111, 0.2222, 0.1111, 0.1667, 0.1667, 0.2778, 0.2222, 0.2222, 0.2778, 0.2222, 0.3333, 0.2222, 0.3333, 0.3333, 0.5, 0.3889, 0.3611, 0.3889, 0.4444, 0.5, 0.5, 0.4444, 0.4444, 0.5, NaN, 0.5556, 0.3889, 0.5556, 0.5556, 0.5, 0.5556, 0.4167, 0.6111, 0.6111, 0.5556, 0.6111, 0.6111, 0.6111, 0.7222, 0.6667, 0.7222, 0.5556, 0.6111, 0.7778, 0.7222, 0.6667, 0.7778, 0.7222, 0.6111, 0.6111, 0.7222, 0.7222, 0.6667, 0.6667, 0.7778, 0.8333, 0.7778, 0.6667, 0.8333, 0.9444, 0.7778, 0.8889, 0.8889, 0.8889, 0.9444, 0.8889, 0.9444, 0.9444, 0.8333, 1.0, 0.8889, 0.8333, 0.9444, 0.9444, 0.8889, 0.8889, 0.9444, 1.0], [0.1111, 0.0556, 0.0556, 0.1667, 0.2222, 0.1667, 0.1667, 0.2222, 0.2778, 0.2222, 0.2778, 0.2222, 0.2778, 0.2222, 0.2778, 0.2778, 0.2222, 0.3333, 0.2778, 0.3333, 0.4444, 0.4444, 0.3889, 0.3333, 0.3333, 0.3333, 0.4444, 0.4444, 0.3889, 0.4444, 0.3889, 0.4444, NaN, 0.5, 0.5, 0.5556, 0.4444, 0.5, 0.5556, 0.5556, 0.5, 0.5, 0.6111, 0.4444, 0.5556, 0.5556, 0.6111, 0.6111, 0.6667, 0.6111, 0.7222, 0.6111, 0.6111, 0.6667, 0.5556, 0.7222, 0.6667, 0.6111, 0.6667, 0.6111, 0.6111, 0.6111, 0.7222, 0.6667, 0.7222, 0.8889, 0.7778, 0.8333, 0.7778, 0.7778, 0.7778, 0.8889, 0.8333, 0.8889, 0.8333, 0.8889, 0.8889, 0.9444, 0.8889, 0.9444, 0.8889, 0.8889, 0.9444, 1.0, 1.0], [0.0, 0.0556, 0.0556, 0.0, 0.0556, 0.0556, 0.0556, 0.1667, 0.0556, 0.1111, 0.1667, 0.0, 0.2222, 0.3333, 0.2222, 0.2222, 0.2778, 0.2222, 0.2222, 0.2778, 0.3333, 0.3333, 0.5, 0.4444, 0.2778, 0.3333, 0.5, 0.3889, 0.3333, 0.6111, 0.4444, 0.6111, 0.5, NaN, 0.5, 0.5556, 0.6111, 0.5556, 0.6111, 0.6111, 0.5556, 0.6111, 0.5556, 0.6111, 0.5, 0.6667, 0.7222, 0.5556, 0.5556, 0.6667, 0.6667, 0.6667, 0.6667, 0.7222, 0.6111, 0.6667, 0.6667, 0.7222, 0.7778, 0.6667, 0.6667, 0.7222, 0.7222, 0.7222, 0.8889, 0.7778, 0.8333, 0.7778, 0.8333, 0.8333, 0.7778, 0.8333, 0.7778, 0.8889, 0.9444, 0.7778, 0.8889, 0.8889, 0.8889, 0.8333, 0.9444, 0.9444, 0.8889, 0.9444, 0.9444], [0.0556, 0.0556, 0.0556, 0.1111, 0.1111, 0.1111, 0.3333, 0.2222, 0.2222, 0.2222, 0.2222, 0.2778, 0.2778, 0.2778, 0.3333, 0.2778, 0.3333, 0.2778, 0.3333, 0.4444, 0.3889, 0.3333, 0.2778, 0.3333, 0.3333, 0.3889, 0.2778, 0.3889, 0.3333, 0.4444, 0.5, 0.4444, 0.5, 0.5, NaN, 0.4444, 0.5, 0.5556, 0.5, 0.5, 0.5556, 0.5, 0.5, 0.7778, 0.7778, 0.4444, 0.6111, 0.6111, 0.6111, 0.4444, 0.6667, 0.6667, 0.6111, 0.6667, 0.6111, 0.6667, 0.6667, 0.5, 0.6111, 0.6667, 0.6667, 0.5556, 0.7778, 0.7222, 0.6667, 0.7778, 0.7222, 0.7222, 0.7222, 0.7222, 0.8333, 0.7778, 0.8333, 0.8333, 0.7778, 0.8333, 0.8333, 0.8889, 0.9444, 0.9444, 0.8889, 0.9444, 0.9444, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.0556, 0.0556, 0.1111, 0.1111, 0.1111, 0.1111, 0.2222, 0.1667, 0.2222, 0.3333, 0.2222, 0.1667, 0.2778, 0.2778, 0.2778, 0.3333, 0.4444, 0.3889, 0.2778, 0.3889, 0.2778, 0.5, 0.3889, 0.4444, 0.4444, 0.4444, 0.5556, NaN, 0.7222, 0.5556, 0.5, 0.5, 0.5556, 0.6111, 0.5556, 0.6667, 0.6667, 0.6667, 0.7222, 0.6111, 0.6111, 0.8333, 0.6667, 0.7222, 0.5556, 0.7778, 0.7222, 0.6111, 0.6667, 0.7222, 0.6667, 0.7222, 0.7222, 0.8333, 0.7222, 0.7222, 0.7222, 0.7222, 0.8333, 0.7222, 0.7222, 0.8889, 0.7778, 0.7778, 0.7778, 1.0, 0.8889, 0.8889, 1.0, 0.8333, 0.9444, 0.9444, 1.0, 0.9444, 0.8889, 1.0, 1.0], [0.0556, 0.0556, 0.0556, 0.1111, 0.1111, 0.0, 0.1111, 0.1667, 0.1111, 0.1111, 0.1111, 0.1111, 0.1111, 0.1111, 0.2222, 0.2778, 0.2222, 0.2222, 0.1667, 0.3333, 0.2778, 0.2778, 0.2778, 0.3333, 0.3889, 0.3333, 0.25, 0.3333, 0.3333, 0.3333, 0.3889, 0.5, 0.5556, 0.3889, 0.5, 0.2778, NaN, 0.5, 0.5556, 0.5556, 0.6111, 0.5, 0.5556, 0.6111, 0.5556, 0.7778, 0.5, 0.5, 0.5, 0.4444, 0.7222, 0.6667, 0.6111, 0.5556, 0.6111, 0.6111, 0.6667, 0.7778, 0.5556, 0.7222, 0.7222, 0.8333, 0.7778, 0.8333, 0.7222, 0.7222, 0.8333, 0.7222, 0.7222, 0.9444, 0.8889, 0.7778, 0.8889, 0.8333, 0.8333, 0.8889, 0.9444, 0.8333, 0.9444, 0.9444, 1.0, 0.9444, 0.9444, 1.0, 1.0], [0.0, 0.0, 0.0556, 0.0556, 0.0556, 0.1667, 0.0556, 0.0556, 0.0556, 0.1667, 0.0556, 0.1111, 0.1111, 0.2778, 0.1111, 0.2222, 0.2778, 0.2222, 0.2222, 0.2778, 0.2778, 0.2778, 0.3333, 0.2222, 0.2222, 0.4444, 0.3889, 0.4444, 0.3333, 0.4444, 0.5, 0.4444, 0.5, 0.4444, 0.4444, 0.4444, 0.5, NaN, 0.5556, 0.5556, 0.5556, 0.5, 0.5556, 0.6111, 0.5, 0.5556, 0.6667, 0.5556, 0.6667, 0.5556, 0.6667, 0.5556, 0.5556, 0.6667, 0.6111, 0.6667, 0.6111, 0.6111, 0.7222, 0.6111, 0.6111, 0.7222, 0.7222, 0.7778, 0.7778, 0.7222, 0.7778, 0.7222, 0.9444, 0.7778, 0.7778, 0.8333, 0.8889, 0.8333, 0.9444, 0.8889, 0.9444, 0.8889, 0.8889, 0.8889, 0.8889, 0.8333, 0.8333, 0.9444, 1.0], [0.0556, 0.0556, 0.0556, 0.0556, 0.0, 0.1111, 0.1111, 0.1111, 0.3333, 0.1667, 0.3333, 0.2222, 0.2222, 0.3333, 0.2778, 0.3333, 0.2222, 0.3333, 0.3333, 0.3889, 0.3889, 0.3889, 0.3889, 0.5, 0.5, 0.2778, 0.4444, 0.2778, 0.3889, 0.3889, 0.3889, 0.5833, 0.4444, 0.3889, 0.5, 0.5, 0.4444, 0.4444, NaN, 0.4444, 0.5556, 0.4444, 0.4444, 0.5, 0.5556, 0.5, 0.5278, 0.6111, 0.5278, 0.5, 0.5, 0.5556, 0.5556, 0.5556, 0.6111, 0.6667, 0.6667, 0.5556, 0.5556, 0.6667, 0.6667, 0.6111, 0.6667, 0.6111, 0.6944, 0.6944, 0.5556, 0.7222, 0.7222, 0.7222, 0.7222, 0.7778, 0.7778, 0.8333, 0.7778, 0.8333, 0.7222, 0.8333, 0.9444, 0.8889, 0.8056, 0.8889, 0.9444, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.1111, 0.1111, 0.1111, 0.1111, 0.1111, 0.1111, 0.0556, 0.0556, 0.1111, 0.1111, 0.1667, 0.2778, 0.1667, 0.2222, 0.2778, 0.2778, 0.2222, 0.3889, 0.3889, 0.3333, 0.2778, 0.2778, 0.2778, 0.3333, 0.3333, 0.3889, 0.4444, 0.3889, 0.5, 0.5, 0.4444, 0.4444, 0.5556, NaN, 0.5556, 0.5556, 0.5556, 0.6111, 0.6111, 0.5556, 0.6111, 0.5556, 0.5, 0.7222, 0.6667, 0.6111, 0.5556, 0.7222, 0.5833, 0.6667, 0.6667, 0.6111, 0.6667, 0.6667, 0.6667, 0.7222, 0.7222, 0.6111, 0.7222, 0.6667, 0.8333, 0.7222, 0.7222, 0.8333, 0.6667, 0.8333, 0.7222, 0.9444, 0.8333, 0.8333, 1.0, 0.7778, 0.8333, 0.7778, 0.9444, 0.8889, 0.8889, 0.8889, 1.0], [0.0, 0.0556, 0.0, 0.0, 0.0, 0.0556, 0.1667, 0.1667, 0.0833, 0.1111, 0.1667, 0.1111, 0.1111, 0.1667, 0.1111, 0.2222, 0.1667, 0.1667, 0.1667, 0.3333, 0.2222, 0.4444, 0.2778, 0.2778, 0.2778, 0.3889, 0.2222, 0.3889, 0.3333, 0.3333, 0.3889, 0.3889, 0.5, 0.4444, 0.4444, 0.4444, 0.3889, 0.4444, 0.4444, 0.4444, NaN, 0.5556, 0.5, 0.7222, 0.6111, 0.3889, 0.6111, 0.5556, 0.6111, 0.5556, 0.7222, 0.6111, 0.6667, 0.6111, 0.5556, 0.6111, 0.6111, 0.5556, 0.6111, 0.6111, 0.6111, 0.6111, 0.7222, 0.6667, 0.6111, 0.7222, 0.7222, 0.7778, 0.8333, 0.7222, 0.7222, 0.8889, 0.7778, 0.8333, 0.8333, 0.7778, 0.8889, 0.8889, 0.7778, 0.9444, 0.8889, 0.8333, 0.7778, 1.0, 1.0], [0.0556, 0.0556, 0.0556, 0.1111, 0.1111, 0.0556, 0.1667, 0.1667, 0.1667, 0.2222, 0.1667, 0.1667, 0.1667, 0.2222, 0.2222, 0.2778, 0.2222, 0.2778, 0.1667, 0.3333, 0.2778, 0.3333, 0.2222, 0.3333, 0.3333, 0.2222, 0.3333, 0.2222, 0.2778, 0.3889, 0.4444, 0.4444, 0.5, 0.3889, 0.5, 0.3889, 0.5, 0.5, 0.5556, 0.4444, 0.4444, NaN, 0.4444, 0.3611, 0.5556, 0.4444, 0.5556, 0.5, 0.6111, 0.3889, 0.6111, 0.6667, 0.6111, 0.5556, 0.6667, 0.5556, 0.5556, 0.5556, 0.6111, 0.6111, 0.6111, 0.6111, 0.7222, 0.7222, 0.6667, 0.7222, 0.7222, 0.7222, 0.6111, 0.7222, 0.7778, 0.8333, 0.8333, 0.8333, 0.7222, 0.7222, 0.7778, 0.7222, 0.8889, 0.8333, 0.8889, 0.8889, 0.8889, 1.0, 0.9444], [0.0556, 0.0, 0.0, 0.0556, 0.0556, 0.0556, 0.1667, 0.1111, 0.1111, 0.0556, 0.1667, 0.1111, 0.1111, 0.0556, 0.1111, 0.1667, 0.1667, 0.2778, 0.1667, 0.3333, 0.2222, 0.2778, 0.2222, 0.3333, 0.3889, 0.2778, 0.2778, 0.2778, 0.2778, 0.3333, 0.3333, 0.3889, 0.3889, 0.4444, 0.5, 0.4444, 0.4444, 0.4444, 0.5556, 0.4444, 0.5, 0.5556, NaN, 0.6111, 0.6111, 0.4444, 0.5556, 0.6111, 0.5556, 0.7222, 0.6667, 0.5556, 0.6111, 0.7222, 0.5556, 0.6667, 0.6667, 0.6111, 0.6667, 0.6111, 0.6111, 0.6667, 0.7222, 0.6111, 0.6667, 0.6667, 0.7222, 0.7222, 0.7222, 0.7778, 0.6667, 0.7778, 0.7222, 0.9444, 0.8333, 0.8333, 1.0, 0.7778, 0.7778, 0.8333, 0.8889, 0.8333, 0.8889, 0.8889, 1.0], [0.0556, 0.0556, 0.1111, 0.1111, 0.1111, 0.1667, 0.1667, 0.1667, 0.1111, 0.2222, 0.1667, 0.1667, 0.2222, 0.2222, 0.1667, 0.2222, 0.2778, 0.1667, 0.2778, 0.2222, 0.2778, 0.2778, 0.3333, 0.2222, 0.2222, 0.3889, 0.2778, 0.4444, 0.2778, 0.3333, 0.3889, 0.3889, 0.5556, 0.3889, 0.2222, 0.3333, 0.3889, 0.3889, 0.5, 0.3889, 0.2778, 0.6389, 0.3889, NaN, 0.5, 0.3889, 0.5, 0.4444, 0.5, 0.3889, 0.5556, 0.5556, 0.5, 0.5556, 0.5556, 0.5556, 0.5556, 0.5, 0.5556, 0.5556, 0.5556, 0.6111, 0.7222, 0.7778, 0.5556, 0.6667, 0.7222, 0.7222, 0.7222, 0.7222, 0.7222, 0.7778, 0.8889, 0.7222, 0.7778, 0.8889, 0.7222, 0.8333, 0.8889, 0.8889, 0.7222, 0.8889, 0.9444, 1.0, 1.0], [0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.1111, 0.1667, 0.2222, 0.1111, 0.1111, 0.1667, 0.1667, 0.2222, 0.2222, 0.2778, 0.2222, 0.3333, 0.2778, 0.2222, 0.2222, 0.3333, 0.3333, 0.2778, 0.2222, 0.2778, 0.2778, 0.2778, 0.3333, 0.3333, 0.3333, 0.3333, 0.3889, 0.4444, 0.5, 0.2222, 0.3333, 0.4444, 0.5, 0.4444, 0.3889, 0.3889, 0.4444, 0.3889, 0.5, NaN, 0.3889, 0.5556, 0.5, 0.4444, 0.3889, 0.5, 0.5556, 0.6111, 0.5556, 0.5, 0.5556, 0.5556, 0.5, 0.5556, 0.6111, 0.6111, 0.3889, 0.6667, 0.7222, 0.6111, 0.7222, 0.6667, 0.7222, 0.7222, 0.6111, 0.7222, 0.7222, 0.8333, 0.7222, 0.7778, 0.8333, 0.7778, 0.8889, 0.8333, 0.9444, 0.8333, 0.8889, 0.8333, 1.0, 1.0], [0.0, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.1111, 0.1111, 0.1667, 0.2778, 0.2222, 0.2222, 0.1111, 0.1667, 0.2222, 0.2222, 0.2222, 0.2778, 0.2778, 0.2778, 0.3333, 0.1667, 0.3333, 0.2778, 0.3333, 0.2778, 0.4444, 0.3333, 0.5556, 0.3333, 0.2222, 0.4444, 0.5, 0.4444, 0.6111, 0.5556, 0.5556, 0.6111, 0.6111, NaN, 0.3889, 0.3889, 0.5556, 0.4444, 0.5556, 0.6111, 0.5, 0.4444, 0.5556, 0.5556, 0.5556, 0.6944, 0.5, 0.6667, 0.6667, 0.7778, 0.6111, 0.7222, 0.7222, 0.7778, 0.6667, 0.7222, 0.6667, 0.7778, 0.7778, 0.7222, 0.7222, 0.7778, 0.6667, 0.7778, 0.8889, 0.7778, 0.8889, 0.8333, 0.9444, 0.8889, 0.9444, 0.9444, 1.0], [0.0556, 0.0, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.0556, 0.1667, 0.0556, 0.1111, 0.1111, 0.1667, 0.2778, 0.1111, 0.3333, 0.0556, 0.1667, 0.1667, 0.2778, 0.2778, 0.2778, 0.2778, 0.2778, 0.3333, 0.3333, 0.3889, 0.3889, 0.3333, 0.3333, 0.3889, 0.2778, 0.3889, 0.2778, 0.5, 0.3333, 0.4722, 0.3889, 0.3889, 0.4444, 0.4444, 0.5, 0.4444, 0.6111, NaN, 0.4444, 0.5556, 0.5556, 0.5556, 0.5556, 0.4444, 0.6111, 0.5, 0.6667, 0.7222, 0.6667, 0.5, 0.6111, 0.6111, 0.6111, 0.6667, 0.6667, 0.6667, 0.6667, 0.7222, 0.7222, 0.6667, 0.7778, 0.7222, 0.7778, 0.8333, 0.7222, 0.7778, 0.8333, 0.7778, 0.8889, 0.8333, 0.8333, 0.8889, 0.8333, 0.8333, 0.8889, 0.9444], [0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0556, 0.1111, 0.1111, 0.1667, 0.1111, 0.1111, 0.0556, 0.0556, 0.2222, 0.2222, 0.2778, 0.1667, 0.2222, 0.1111, 0.2778, 0.2222, 0.3333, 0.1667, 0.2222, 0.2778, 0.3333, 0.3333, 0.3333, 0.2778, 0.3333, 0.3889, 0.2778, 0.3889, 0.4444, 0.3889, 0.3889, 0.5, 0.4444, 0.3889, 0.4444, 0.4444, 0.5, 0.3889, 0.5556, 0.5, 0.6111, 0.5556, NaN, 0.5, 0.5, 0.5278, 0.5, 0.4722, 0.4444, 0.6111, 0.5556, 0.5556, 0.6111, 0.5, 0.6667, 0.6667, 0.6667, 0.6667, 0.6667, 0.6111, 0.6111, 0.6667, 0.7222, 0.7778, 0.6111, 0.6667, 0.7222, 0.6667, 0.8333, 0.7222, 0.7778, 0.8333, 0.7778, 0.8333, 0.8333, 0.8333, 0.8889, 0.8333, 0.8889, 1.0], [0.0, 0.0, 0.0556, 0.1667, 0.1667, 0.0556, 0.0556, 0.1111, 0.1667, 0.1111, 0.1111, 0.2222, 0.1111, 0.1667, 0.3333, 0.2778, 0.2778, 0.3333, 0.2222, 0.2222, 0.3889, 0.1667, 0.1667, 0.3333, 0.3333, 0.2778, 0.2778, 0.2778, 0.2778, 0.3333, 0.3333, 0.4444, 0.3333, 0.4444, 0.3889, 0.3889, 0.5, 0.3333, 0.4722, 0.5, 0.3889, 0.3889, 0.4444, 0.5, 0.5556, 0.4444, 0.4444, 0.5, NaN, 0.3333, 0.3889, 0.5, 0.3889, 0.4444, 0.6667, 0.5556, 0.5556, 0.5556, 0.4444, 0.6111, 0.6111, 0.5556, 0.5556, 0.6667, 0.5833, 0.6389, 0.5556, 0.6667, 0.5556, 0.6111, 0.7222, 0.6667, 0.6667, 0.6667, 0.6111, 0.8889, 0.6667, 0.7222, 0.9444, 0.8889, 0.75, 0.9444, 0.9444, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0278, 0.0, 0.0556, 0.0556, 0.0, 0.0556, 0.0556, 0.0, 0.1111, 0.1667, 0.1111, 0.1667, 0.2778, 0.0, 0.1111, 0.2222, 0.2222, 0.2222, 0.2222, 0.3889, 0.2778, 0.1667, 0.2778, 0.2222, 0.2778, 0.3333, 0.3889, 0.3889, 0.3333, 0.5556, 0.1667, 0.5556, 0.4444, 0.5, 0.2778, 0.4444, 0.6111, 0.2778, 0.6111, 0.6111, 0.5556, 0.4444, 0.5, 0.6667, NaN, 0.6111, 0.5556, 0.3333, 0.6111, 0.6111, 0.6111, 0.5556, 0.6111, 0.6111, 0.6111, 0.6111, 0.6111, 0.6667, 0.7222, 0.6667, 0.6667, 0.6667, 0.7222, 0.7222, 0.7222, 0.7222, 0.7222, 0.7778, 0.8889, 0.7222, 0.8333, 0.8889, 0.7778, 0.8333, 0.8333, 0.8889, 0.8333, 0.8333, 0.8889, 1.0], [0.0556, 0.0556, 0.1111, 0.1111, 0.0556, 0.1667, 0.1667, 0.0, 0.0556, 0.1667, 0.2222, 0.1667, 0.2222, 0.1667, 0.2222, 0.2222, 0.3333, 0.2222, 0.2222, 0.1667, 0.2778, 0.3333, 0.2778, 0.3333, 0.1667, 0.2778, 0.2778, 0.3889, 0.3333, 0.2778, 0.2222, 0.2222, 0.2778, 0.3333, 0.3333, 0.3333, 0.2778, 0.3333, 0.5, 0.3333, 0.2778, 0.3889, 0.3333, 0.4444, 0.5, 0.4444, 0.4444, 0.4722, 0.6111, 0.3889, NaN, 0.3889, 0.3333, 0.5556, 0.5556, 0.6667, 0.6667, 0.5, 0.5, 0.5556, 0.5556, 0.5, 0.6667, 0.5556, 0.6667, 0.8333, 0.6667, 0.7222, 0.8333, 0.6667, 0.6111, 0.6667, 0.7778, 0.6667, 0.7778, 0.8889, 0.6111, 1.0, 0.8333, 0.8333, 0.8333, 0.8333, 0.9444, 0.9444, 1.0], [0.0, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.0556, 0.0556, 0.0, 0.0556, 0.1111, 0.1111, 0.1111, 0.1667, 0.2222, 0.1667, 0.2222, 0.1667, 0.2222, 0.1111, 0.2778, 0.3333, 0.2778, 0.3333, 0.3333, 0.2778, 0.1667, 0.2778, 0.2222, 0.2222, 0.2778, 0.2778, 0.3889, 0.3333, 0.3333, 0.2778, 0.3333, 0.4444, 0.4444, 0.3889, 0.3889, 0.3333, 0.4444, 0.4444, 0.4444, 0.3889, 0.4444, 0.5, 0.5, 0.4444, 0.6111, NaN, 0.6111, 0.5, 0.5556, 0.5556, 0.5556, 0.4444, 0.5556, 0.5, 0.5, 0.6111, 0.7222, 0.6111, 0.6111, 0.8333, 0.6667, 0.6667, 0.7222, 0.7778, 0.7222, 0.8889, 0.7778, 0.8333, 0.7222, 0.8333, 0.9444, 0.8333, 0.7778, 0.8889, 0.7778, 0.8333, 0.9444, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0, 0.0556, 0.1111, 0.1667, 0.1111, 0.1667, 0.1667, 0.2778, 0.0556, 0.1667, 0.2222, 0.3889, 0.2778, 0.2222, 0.3889, 0.2222, 0.2222, 0.2222, 0.3333, 0.2222, 0.2778, 0.3333, 0.3889, 0.3333, 0.3889, 0.4444, 0.3889, 0.4444, 0.4444, 0.4444, 0.3333, 0.3889, 0.3889, 0.5, 0.3889, 0.5, 0.5556, 0.5278, 0.6111, 0.6667, 0.6667, 0.3889, NaN, 0.5556, 0.6111, 0.5556, 0.5556, 0.6111, 0.6111, 0.6111, 0.6111, 0.5, 0.7222, 0.6111, 0.6667, 0.6667, 0.7222, 0.6667, 0.7778, 0.6667, 0.6111, 0.6667, 0.7222, 0.7778, 0.7778, 0.7222, 0.7778, 0.7778, 0.7222, 0.7778, 0.8889, 0.7778, 0.7222, 0.7778, 0.9444], [0.0, 0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0, 0.1111, 0.1111, 0.1111, 0.0556, 0.0556, 0.0, 0.1667, 0.1111, 0.2222, 0.1667, 0.1111, 0.1667, 0.1667, 0.2222, 0.2222, 0.2778, 0.1667, 0.2778, 0.2778, 0.2778, 0.2778, 0.2222, 0.2222, 0.3889, 0.2222, 0.3333, 0.2778, 0.3333, 0.2222, 0.4444, 0.3333, 0.4444, 0.2778, 0.3889, 0.4444, 0.2778, 0.4444, 0.4444, 0.5556, 0.3889, 0.5556, 0.5556, 0.3889, 0.4444, 0.5, 0.4444, NaN, 0.5833, 0.6667, 0.6111, 0.5, 0.5556, 0.6111, 0.6111, 0.6667, 0.5556, 0.6667, 0.6111, 0.6111, 0.8333, 0.7778, 0.7778, 0.8333, 0.7222, 0.6111, 0.7222, 0.6111, 0.9444, 0.7222, 0.7222, 0.7778, 0.8333, 0.8889, 0.8889, 0.8333, 0.7778, 0.8889, 1.0], [0.0, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.1667, 0.1111, 0.1111, 0.2222, 0.2222, 0.1667, 0.1667, 0.2222, 0.1111, 0.1111, 0.2778, 0.2778, 0.2222, 0.3889, 0.2222, 0.2778, 0.2222, 0.2222, 0.2222, 0.2222, 0.2778, 0.2778, 0.4444, 0.3889, 0.3889, 0.2778, 0.3889, 0.3889, 0.3889, 0.4167, 0.4444, 0.3333, 0.4444, 0.4444, 0.5, 0.4444, 0.5, 0.3889, 0.3333, 0.3889, 0.4444, 0.4444, 0.3889, 0.4167, NaN, 0.5556, 0.6111, 0.5, 0.5, 0.4444, 0.4444, 0.6667, 0.6667, 0.6667, 0.5556, 0.7222, 0.6111, 0.7222, 0.7222, 0.6111, 0.7778, 0.8889, 0.7222, 0.7778, 0.6667, 0.7778, 0.7778, 0.8333, 0.6667, 0.8333, 0.6111, 0.7222, 0.9444, 0.9444, 1.0], [0.1111, 0.0556, 0.0556, 0.1667, 0.1111, 0.1667, 0.1667, 0.1667, 0.1667, 0.2222, 0.2222, 0.2222, 0.3333, 0.3333, 0.2778, 0.3889, 0.2778, 0.3333, 0.2778, 0.3889, 0.3333, 0.3889, 0.2778, 0.2778, 0.3333, 0.2778, 0.3889, 0.3333, 0.3889, 0.3889, 0.4444, 0.3889, 0.2778, 0.3333, 0.3333, 0.3889, 0.3889, 0.3333, 0.3333, 0.3333, 0.3889, 0.4444, 0.3333, 0.4444, 0.4444, 0.4444, 0.3333, 0.4444, 0.4444, 0.3889, 0.3333, 0.4444, 0.4444, 0.3333, 0.4444, NaN, 0.5278, 0.4444, 0.3889, 0.5, 0.5, 0.3889, 0.3889, 0.5556, 0.5556, 0.5, 0.5556, 0.9444, 0.5, 0.5556, 0.5556, 0.5, 0.5556, 0.5, 0.6111, 0.5556, 0.5556, 0.6667, 0.6667, 0.7222, 0.6667, 0.6667, 0.8333, 0.9444, 1.0], [0.0556, 0.0556, 0.0556, 0.1667, 0.1111, 0.1667, 0.1667, 0.1667, 0.1667, 0.2222, 0.2222, 0.1667, 0.2778, 0.3333, 0.2222, 0.3333, 0.2222, 0.2778, 0.2778, 0.3889, 0.3333, 0.3889, 0.3333, 0.25, 0.3333, 0.2222, 0.3333, 0.2778, 0.3889, 0.3889, 0.4444, 0.3889, 0.3333, 0.3333, 0.3333, 0.3333, 0.3333, 0.3889, 0.3333, 0.3333, 0.3889, 0.4444, 0.3333, 0.4444, 0.4444, 0.4444, 0.2778, 0.4444, 0.4444, 0.4444, 0.3333, 0.4444, 0.4444, 0.3889, 0.3889, 0.4722, NaN, 0.4444, 0.3889, 0.5, 0.5, 0.3889, 0.3889, 0.5556, 0.5, 0.5, 0.6111, 0.8889, 0.5, 0.5556, 0.5556, 0.4444, 0.5556, 0.5, 0.6667, 0.5556, 0.5556, 0.6667, 0.6667, 0.7222, 0.6667, 0.7222, 0.8333, 0.9444, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.0556, 0.1111, 0.0556, 0.1111, 0.0556, 0.1111, 0.2222, 0.1667, 0.1667, 0.1667, 0.1667, 0.2222, 0.1667, 0.1111, 0.3333, 0.3333, 0.2222, 0.2778, 0.1111, 0.2222, 0.2222, 0.2778, 0.2778, 0.3889, 0.2778, 0.5, 0.2778, 0.2222, 0.3889, 0.4444, 0.3889, 0.4444, 0.4444, 0.3889, 0.5, 0.5, 0.3056, 0.3333, 0.3889, 0.4444, 0.3889, 0.5, 0.5556, 0.3889, 0.5, 0.5, 0.5556, 0.5556, NaN, 0.4444, 0.6667, 0.6667, 0.6111, 0.6111, 0.6667, 0.5556, 0.6667, 0.6111, 0.6667, 0.6667, 0.6667, 0.7222, 0.7222, 0.7778, 0.7222, 0.6667, 0.7222, 0.7778, 0.7222, 0.8333, 0.6667, 0.8889, 0.8889, 0.8333, 0.8889, 0.9444], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.1111, 0.1111, 0.0556, 0.0556, 0.0, 0.1111, 0.0556, 0.1667, 0.0556, 0.1111, 0.1111, 0.1667, 0.1111, 0.1667, 0.2222, 0.2222, 0.2778, 0.2778, 0.3333, 0.2778, 0.2222, 0.2222, 0.3333, 0.2778, 0.3333, 0.2222, 0.3889, 0.3333, 0.4444, 0.2778, 0.4444, 0.3333, 0.3889, 0.3889, 0.3333, 0.4444, 0.4444, 0.5, 0.5, 0.5, 0.5556, 0.3889, 0.5, 0.4444, 0.3889, 0.4444, 0.5, 0.6111, 0.6111, 0.5556, NaN, 0.6111, 0.6111, 0.6111, 0.5556, 0.6667, 0.6667, 0.5556, 0.6667, 0.7778, 0.6111, 0.7222, 0.7222, 0.6111, 0.7222, 0.6111, 0.7222, 0.7222, 0.6111, 0.7778, 0.7222, 0.8333, 0.8889, 0.7222, 0.7778, 0.9444, 0.9444], [0.0556, 0.0, 0.0, 0.0, 0.0556, 0.2222, 0.0556, 0.2222, 0.2222, 0.1667, 0.1667, 0.2778, 0.2222, 0.2778, 0.2778, 0.1667, 0.3889, 0.3333, 0.2778, 0.2778, 0.3889, 0.3333, 0.2778, 0.2778, 0.3889, 0.3889, 0.2778, 0.3333, 0.3333, 0.2778, 0.4444, 0.3333, 0.3889, 0.3333, 0.3333, 0.2778, 0.2778, 0.3889, 0.3333, 0.3333, 0.3889, 0.3889, 0.3889, 0.4444, 0.3889, 0.3333, 0.3889, 0.3333, 0.3889, 0.3889, 0.4444, 0.5, 0.3889, 0.3889, 0.5556, 0.5, 0.5, 0.3333, 0.3889, NaN, 0.5833, 0.5556, 0.5556, 0.4444, 0.4444, 0.5, 0.4444, 0.6111, 0.5, 0.5556, 0.5556, 0.5556, 0.5556, 0.4444, 0.5556, 0.6111, 0.6667, 0.6111, 0.6667, 0.5556, 0.6389, 0.6667, 0.7222, 0.8333, 0.9444], [0.0, 0.0, 0.0, 0.0, 0.0, 0.2222, 0.0556, 0.2222, 0.1667, 0.1111, 0.1111, 0.1667, 0.1667, 0.2778, 0.2778, 0.1111, 0.3889, 0.3333, 0.2778, 0.2222, 0.3889, 0.2778, 0.2778, 0.2778, 0.3889, 0.3889, 0.2778, 0.3333, 0.3333, 0.2778, 0.4444, 0.3333, 0.3889, 0.3333, 0.3333, 0.2778, 0.2778, 0.3889, 0.3333, 0.3333, 0.3889, 0.3889, 0.3889, 0.4444, 0.3889, 0.3333, 0.3889, 0.3333, 0.3889, 0.3889, 0.4444, 0.5, 0.3889, 0.3889, 0.5556, 0.5, 0.5, 0.3333, 0.3889, 0.4167, NaN, 0.5556, 0.5556, 0.4444, 0.4444, 0.5, 0.4444, 0.6111, 0.5, 0.5556, 0.5556, 0.5556, 0.5556, 0.4444, 0.5556, 0.6111, 0.6667, 0.6111, 0.6667, 0.5556, 0.6389, 0.6667, 0.7222, 0.8333, 0.9444], [0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0, 0.0556, 0.1111, 0.0556, 0.0556, 0.1667, 0.1111, 0.1111, 0.0556, 0.2222, 0.1667, 0.1111, 0.1667, 0.1111, 0.1111, 0.1667, 0.2222, 0.2222, 0.2222, 0.2222, 0.2222, 0.2222, 0.1667, 0.2222, 0.1667, 0.2778, 0.2222, 0.3889, 0.2778, 0.4444, 0.1667, 0.1667, 0.2778, 0.3889, 0.2778, 0.3889, 0.3889, 0.3333, 0.3889, 0.6111, 0.2222, 0.3889, 0.3333, 0.4444, 0.3889, 0.5, 0.3889, 0.5, 0.3333, 0.3333, 0.6111, 0.6111, 0.3889, 0.3889, 0.4444, 0.4444, NaN, 0.5, 0.6111, 0.5556, 0.6667, 0.6111, 0.7222, 0.6111, 0.6111, 0.6667, 0.6667, 0.6111, 0.7222, 0.6111, 0.7778, 0.7222, 0.7222, 0.7222, 0.7222, 0.7222, 0.7778, 0.8889, 0.9444, 1.0], [0.0556, 0.0556, 0.0556, 0.0556, 0.0, 0.1667, 0.1111, 0.0556, 0.0, 0.1667, 0.1667, 0.1111, 0.1667, 0.1667, 0.1667, 0.1667, 0.1111, 0.1111, 0.2222, 0.1111, 0.1111, 0.2222, 0.2778, 0.2222, 0.1667, 0.2222, 0.2222, 0.2222, 0.2778, 0.2222, 0.3333, 0.1667, 0.2778, 0.2778, 0.2222, 0.2778, 0.2222, 0.2778, 0.3333, 0.2778, 0.2778, 0.2778, 0.2778, 0.2778, 0.3333, 0.3889, 0.3333, 0.3333, 0.4444, 0.3333, 0.3333, 0.2778, 0.2778, 0.4444, 0.3333, 0.6111, 0.6111, 0.3889, 0.4444, 0.4444, 0.4444, 0.5, NaN, 0.5, 0.5556, 0.6111, 0.6111, 0.7222, 0.7222, 0.6111, 0.5, 0.6111, 0.6667, 0.5556, 0.6667, 0.7778, 0.5556, 0.7778, 0.7222, 0.7222, 0.6667, 0.7222, 0.8333, 0.8889, 0.9444], [0.0, 0.0, 0.1111, 0.0556, 0.0556, 0.0, 0.0556, 0.0, 0.1111, 0.0556, 0.1111, 0.1667, 0.1111, 0.0556, 0.2222, 0.1667, 0.2222, 0.2222, 0.1111, 0.1111, 0.2222, 0.1667, 0.1111, 0.2222, 0.2222, 0.2778, 0.2222, 0.1667, 0.2222, 0.1667, 0.1667, 0.2222, 0.3333, 0.2778, 0.2778, 0.2778, 0.1667, 0.2222, 0.3889, 0.3889, 0.3333, 0.2778, 0.3889, 0.2222, 0.2778, 0.2778, 0.3333, 0.3333, 0.3333, 0.2778, 0.4444, 0.3889, 0.3889, 0.3333, 0.3333, 0.4444, 0.4444, 0.3333, 0.3333, 0.5556, 0.5556, 0.3889, 0.5, NaN, 0.4444, 0.5556, 0.5556, 0.5, 0.5556, 0.5, 0.7778, 0.5556, 0.8333, 0.6667, 0.5, 0.6667, 0.5556, 0.7222, 0.7778, 0.5556, 0.7222, 0.7778, 0.8333, 0.8333, 0.9444], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.1111, 0.0, 0.1667, 0.0, 0.0556, 0.0833, 0.1667, 0.1111, 0.1667, 0.25, 0.1944, 0.1111, 0.1667, 0.2778, 0.2222, 0.1667, 0.3333, 0.3333, 0.3333, 0.2778, 0.1111, 0.3333, 0.2778, 0.2778, 0.2222, 0.3056, 0.2778, 0.3889, 0.3333, 0.3333, 0.4444, 0.3889, 0.2778, 0.3333, 0.3889, 0.4167, 0.3333, 0.3333, 0.3889, 0.3333, 0.3889, 0.4444, 0.4444, 0.5, 0.4444, 0.3333, 0.5556, 0.5556, 0.4444, 0.4444, 0.5556, NaN, 0.4722, 0.4444, 0.7222, 0.5, 0.4444, 0.5556, 0.5556, 0.6667, 0.6111, 0.5556, 0.6667, 0.5, 0.6111, 0.7778, 0.7222, 0.6944, 0.7778, 0.8333, 0.8889, 0.9444], [0.0, 0.0556, 0.0556, 0.0, 0.0, 0.1111, 0.1111, 0.0, 0.0, 0.1667, 0.2222, 0.1111, 0.2222, 0.2222, 0.1111, 0.2222, 0.2222, 0.0556, 0.1667, 0.1111, 0.2222, 0.1111, 0.2778, 0.2778, 0.0556, 0.1667, 0.2778, 0.1667, 0.1667, 0.3333, 0.2778, 0.1667, 0.1111, 0.2222, 0.2222, 0.2778, 0.2778, 0.2778, 0.3056, 0.3333, 0.2778, 0.2778, 0.3333, 0.3333, 0.2778, 0.2222, 0.3333, 0.3889, 0.3611, 0.3333, 0.1667, 0.1667, 0.3333, 0.3889, 0.2778, 0.5, 0.5, 0.3333, 0.4444, 0.5, 0.5, 0.3333, 0.3889, 0.4444, 0.5278, NaN, 0.4444, 0.6111, 0.5, 0.4444, 0.4444, 0.4444, 0.6111, 0.5556, 0.5, 0.6667, 0.4444, 0.7778, 0.8333, 0.6667, 0.6389, 0.8333, 0.8889, 0.9444, 0.9444], [0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0, 0.1667, 0.1111, 0.1111, 0.1667, 0.1111, 0.1667, 0.1111, 0.1667, 0.1667, 0.1667, 0.1111, 0.2222, 0.2222, 0.1111, 0.2222, 0.2222, 0.0556, 0.2222, 0.0556, 0.2222, 0.1667, 0.2778, 0.1667, 0.1667, 0.2222, 0.4444, 0.1667, 0.2778, 0.2778, 0.2778, 0.2778, 0.3333, 0.3333, 0.2778, 0.3333, 0.4444, 0.3333, 0.3333, 0.3333, 0.2778, 0.1667, 0.3889, 0.4444, 0.3889, 0.3889, 0.3333, 0.5556, 0.5556, 0.3889, 0.3889, 0.4444, 0.5556, 0.5556, NaN, 0.6667, 0.6667, 0.7778, 0.5556, 0.6111, 0.5, 0.6111, 0.6667, 0.5556, 0.6667, 0.6667, 0.6667, 0.7222, 0.8333, 0.6111, 0.7778, 0.8333, 0.9444], [0.0556, 0.0556, 0.0556, 0.1667, 0.1111, 0.1667, 0.1667, 0.1667, 0.1111, 0.2222, 0.1667, 0.1667, 0.1667, 0.2222, 0.1667, 0.2222, 0.1667, 0.2222, 0.1667, 0.2222, 0.2222, 0.3333, 0.2778, 0.1667, 0.2222, 0.2222, 0.3333, 0.2222, 0.2778, 0.3333, 0.2222, 0.2222, 0.1667, 0.2222, 0.2778, 0.2778, 0.2778, 0.2778, 0.2778, 0.2778, 0.2222, 0.2778, 0.2778, 0.2778, 0.2778, 0.2778, 0.2778, 0.2778, 0.3333, 0.2778, 0.2778, 0.3333, 0.3333, 0.2222, 0.2778, 0.0556, 0.1111, 0.3333, 0.2222, 0.3889, 0.3889, 0.2778, 0.2778, 0.5, 0.2778, 0.3889, 0.3333, NaN, 0.3333, 0.3889, 0.5, 0.3889, 0.5, 0.4444, 0.4444, 0.4444, 0.3889, 0.5, 0.5, 0.7222, 0.5, 0.5, 0.6667, 0.8333, 0.9444], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.1111, 0.0556, 0.0556, 0.0, 0.1111, 0.1667, 0.0556, 0.1667, 0.1111, 0.1111, 0.1111, 0.1667, 0.2222, 0.2222, 0.1111, 0.1667, 0.2222, 0.1667, 0.2222, 0.2222, 0.1667, 0.2222, 0.2222, 0.1111, 0.2222, 0.1667, 0.2778, 0.2778, 0.2778, 0.0556, 0.2778, 0.2778, 0.1667, 0.3889, 0.2778, 0.2778, 0.2778, 0.3333, 0.3333, 0.2222, 0.4444, 0.2778, 0.1667, 0.2778, 0.2222, 0.2222, 0.2778, 0.5, 0.5, 0.3333, 0.3889, 0.5, 0.5, 0.3889, 0.2778, 0.4444, 0.5, 0.5, 0.3333, 0.6667, NaN, 0.3889, 0.4444, 0.4444, 0.4444, 0.4444, 0.5556, 0.5556, 0.5, 0.6111, 0.6111, 0.6111, 0.7222, 0.6111, 0.6667, 0.8333, 0.8889], [0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.1111, 0.1667, 0.1111, 0.1111, 0.1111, 0.0556, 0.0556, 0.1667, 0.1111, 0.1111, 0.1111, 0.2222, 0.2222, 0.0, 0.1667, 0.1111, 0.0, 0.2222, 0.1111, 0.2222, 0.1667, 0.2778, 0.1111, 0.0556, 0.2222, 0.2778, 0.1667, 0.2778, 0.2778, 0.2222, 0.2778, 0.3889, 0.2222, 0.2222, 0.3889, 0.3889, 0.2778, 0.3333, 0.2222, 0.3333, 0.1667, 0.3889, 0.4444, 0.4444, 0.3333, 0.2778, 0.4444, 0.4444, 0.3889, 0.3889, 0.5, 0.5556, 0.5556, 0.2222, 0.6111, 0.6111, NaN, 0.5, 0.4444, 0.5, 0.5, 0.6111, 0.6111, 0.6111, 0.7222, 0.7222, 0.7222, 0.6667, 0.6667, 0.7778, 0.8889, 0.9444], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.1111, 0.0556, 0.0556, 0.1667, 0.0556, 0.1111, 0.1111, 0.1111, 0.0556, 0.1111, 0.1667, 0.1111, 0.2222, 0.1667, 0.1111, 0.1667, 0.1111, 0.1667, 0.1667, 0.1667, 0.1111, 0.2222, 0.2222, 0.1667, 0.2222, 0.1111, 0.2222, 0.2778, 0.3333, 0.2778, 0.2222, 0.3333, 0.2778, 0.2778, 0.2222, 0.2778, 0.3333, 0.2778, 0.2778, 0.3889, 0.2778, 0.3889, 0.2778, 0.2222, 0.4444, 0.4444, 0.2778, 0.2778, 0.4444, 0.4444, 0.3333, 0.5, 0.2222, 0.4444, 0.5556, 0.4444, 0.5, 0.5556, 0.5, NaN, 0.5556, 0.5833, 0.5556, 0.3889, 0.6667, 0.5556, 0.6667, 0.7222, 0.5, 0.6111, 0.7222, 0.8333, 0.7778, 0.9444], [0.0, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.0556, 0.0, 0.0, 0.0556, 0.1111, 0.1111, 0.1111, 0.1111, 0.1667, 0.1111, 0.1111, 0.1111, 0.1667, 0.0556, 0.1667, 0.1667, 0.0556, 0.1111, 0.1111, 0.0556, 0.1111, 0.0556, 0.1667, 0.1111, 0.2222, 0.0556, 0.1111, 0.1667, 0.2222, 0.2222, 0.2222, 0.1667, 0.2222, 0.1667, 0.1111, 0.1667, 0.2222, 0.2222, 0.2778, 0.2778, 0.2222, 0.2778, 0.3333, 0.2778, 0.3333, 0.1111, 0.3333, 0.3889, 0.1111, 0.5, 0.5556, 0.2778, 0.3889, 0.4444, 0.4444, 0.3333, 0.3889, 0.4444, 0.4444, 0.5556, 0.3889, 0.6111, 0.5556, 0.5556, 0.4444, NaN, 0.5556, 0.4444, 0.6667, 0.5556, 0.6111, 0.6667, 0.5556, 0.6111, 0.6111, 0.6111, 0.8333, 0.8333, 0.8889], [0.0, 0.0556, 0.0556, 0.1111, 0.1111, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.1111, 0.1111, 0.1111, 0.0556, 0.1667, 0.1111, 0.1111, 0.1111, 0.1111, 0.0556, 0.1667, 0.1111, 0.0556, 0.1667, 0.1111, 0.1111, 0.1111, 0.1111, 0.1667, 0.1111, 0.2222, 0.1111, 0.1667, 0.2222, 0.1667, 0.2222, 0.1111, 0.1111, 0.2222, 0.2778, 0.2222, 0.1667, 0.2778, 0.1111, 0.1667, 0.2778, 0.1667, 0.3333, 0.3333, 0.2222, 0.2222, 0.2222, 0.2778, 0.2778, 0.2778, 0.4444, 0.4444, 0.2222, 0.2778, 0.4444, 0.4444, 0.3889, 0.3333, 0.1667, 0.3333, 0.3889, 0.5, 0.5, 0.5556, 0.5, 0.4167, 0.4444, NaN, 0.3333, 0.4444, 0.5556, 0.4444, 0.5, 0.6667, 0.5556, 0.5556, 0.6667, 0.7222, 0.7222, 0.8889], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.1111, 0.1111, 0.0556, 0.1111, 0.2222, 0.1111, 0.0, 0.1111, 0.0556, 0.0556, 0.1667, 0.0556, 0.1111, 0.1111, 0.1667, 0.0, 0.1667, 0.1667, 0.1667, 0.0556, 0.1667, 0.1667, 0.0556, 0.2778, 0.2778, 0.2222, 0.2778, 0.1667, 0.3333, 0.1111, 0.3333, 0.1667, 0.2222, 0.3889, 0.2222, 0.5, 0.5, 0.2778, 0.3889, 0.5556, 0.5556, 0.2778, 0.4444, 0.3333, 0.3889, 0.4444, 0.3889, 0.5556, 0.5556, 0.5, 0.4444, 0.5556, 0.6667, NaN, 0.6111, 0.6667, 0.6111, 0.6111, 0.6111, 0.6111, 0.7222, 0.6667, 0.7778, 0.7778, 0.8889], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0, 0.1111, 0.0, 0.0556, 0.1111, 0.1111, 0.1111, 0.1111, 0.1667, 0.1667, 0.2222, 0.0556, 0.1111, 0.2222, 0.0556, 0.1667, 0.0556, 0.2222, 0.1111, 0.1667, 0.0556, 0.2222, 0.1667, 0.1667, 0.2778, 0.1667, 0.2222, 0.2222, 0.3333, 0.2222, 0.2778, 0.3889, 0.2778, 0.2222, 0.2778, 0.2222, 0.0556, 0.3333, 0.3889, 0.3333, 0.3333, 0.2778, 0.4444, 0.4444, 0.3889, 0.3333, 0.5, 0.4444, 0.5, 0.3333, 0.5556, 0.4444, 0.3889, 0.6111, 0.3333, 0.5556, 0.3889, NaN, 0.6111, 0.3889, 0.6667, 0.6111, 0.5, 0.6667, 0.6111, 0.7222, 0.7778, 0.8889], [0.0556, 0.0, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.1111, 0.0556, 0.1111, 0.1111, 0.0556, 0.0556, 0.1111, 0.0556, 0.0556, 0.0556, 0.0556, 0.2222, 0.0556, 0.1667, 0.0556, 0.1667, 0.1111, 0.0556, 0.2222, 0.1667, 0.1111, 0.2222, 0.1667, 0.1111, 0.1111, 0.1111, 0.1667, 0.1667, 0.2222, 0.2778, 0.1667, 0.1111, 0.1667, 0.2222, 0.1667, 0.2222, 0.1111, 0.1667, 0.1111, 0.1667, 0.2778, 0.2778, 0.2222, 0.4444, 0.4444, 0.2778, 0.2778, 0.3889, 0.3889, 0.2222, 0.2222, 0.3333, 0.3333, 0.3333, 0.4444, 0.5556, 0.4444, 0.3889, 0.3333, 0.4444, 0.4444, 0.3333, 0.3889, NaN, 0.3333, 0.5, 0.5, 0.7222, 0.4444, 0.5, 0.6667, 0.7778, 0.8889], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0556, 0.1111, 0.0, 0.0556, 0.0, 0.0, 0.0556, 0.0, 0.1667, 0.0, 0.1111, 0.1111, 0.1667, 0.0, 0.0556, 0.0556, 0.2778, 0.0, 0.1111, 0.2222, 0.0, 0.2778, 0.2222, 0.1111, 0.2222, 0.1667, 0.3333, 0.1111, 0.3889, 0.0556, 0.2222, 0.2778, 0.2222, 0.4444, 0.4444, 0.2222, 0.3889, 0.3333, 0.3333, 0.2778, 0.4444, 0.4444, 0.5, 0.5556, 0.3333, 0.6111, 0.5, 0.3889, 0.4444, 0.3889, 0.5556, 0.3889, 0.6111, 0.6667, NaN, 0.6111, 0.5556, 0.6111, 0.6111, 0.5556, 0.7778, 0.8333, 0.8889], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0, 0.1111, 0.0556, 0.0, 0.0556, 0.0, 0.0, 0.1111, 0.0556, 0.0556, 0.1111, 0.1111, 0.1111, 0.0, 0.1111, 0.1667, 0.1667, 0.1111, 0.1667, 0.1667, 0.1111, 0.0556, 0.1111, 0.1111, 0.1667, 0.1667, 0.1111, 0.1667, 0.2222, 0.1111, 0.2778, 0.2222, 0.1667, 0.1111, 0.2222, 0.1111, 0.2222, 0.2778, 0.2222, 0.0, 0.1667, 0.2222, 0.2222, 0.1667, 0.3333, 0.3333, 0.2778, 0.2222, 0.3889, 0.3889, 0.2778, 0.2222, 0.2778, 0.3889, 0.2222, 0.3333, 0.5, 0.3889, 0.2778, 0.3333, 0.3333, 0.5, 0.3889, 0.3333, 0.5, 0.3889, NaN, 0.5556, 0.4444, 0.5, 0.5556, 0.6111, 0.7778, 0.9444], [0.0556, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.1111, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.0556, 0.0556, 0.2222, 0.0556, 0.1111, 0.1111, 0.1111, 0.1111, 0.0556, 0.1111, 0.0556, 0.0556, 0.1667, 0.1667, 0.1111, 0.1111, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.1667, 0.2222, 0.1111, 0.2222, 0.1111, 0.1667, 0.1111, 0.1667, 0.1667, 0.0556, 0.1667, 0.1667, 0.2222, 0.2778, 0.1667, 0.3333, 0.3333, 0.3333, 0.1667, 0.2778, 0.3333, 0.3333, 0.2778, 0.2778, 0.2222, 0.2222, 0.1667, 0.3333, 0.5, 0.3889, 0.2778, 0.2778, 0.4444, 0.3333, 0.3889, 0.3889, 0.5, 0.4444, 0.4444, NaN, 0.4444, 0.3333, 0.8056, 0.7778, 0.7222, 0.7778], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0, 0.0556, 0.0, 0.0556, 0.0556, 0.0, 0.1111, 0.0556, 0.0, 0.0, 0.0556, 0.0556, 0.1111, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.1111, 0.0556, 0.1111, 0.2778, 0.0556, 0.0556, 0.1667, 0.0556, 0.0556, 0.0556, 0.1111, 0.1111, 0.2222, 0.0556, 0.1667, 0.1667, 0.1111, 0.0556, 0.1667, 0.1667, 0.1667, 0.1111, 0.1667, 0.1667, 0.1111, 0.2222, 0.1111, 0.1667, 0.2778, 0.2778, 0.3333, 0.1667, 0.4444, 0.4444, 0.2778, 0.2778, 0.4444, 0.2778, 0.3333, 0.2778, 0.2778, 0.3889, 0.2778, 0.5, 0.3889, 0.4444, 0.3889, 0.5, 0.2778, 0.3889, 0.5556, 0.5556, NaN, 0.5, 0.5556, 0.7222, 0.9444, 0.9444], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0556, 0.0, 0.1111, 0.0556, 0.0, 0.0, 0.1667, 0.0556, 0.0, 0.1111, 0.1111, 0.1111, 0.0, 0.0556, 0.0556, 0.0, 0.1667, 0.0556, 0.1111, 0.0556, 0.1111, 0.0, 0.0, 0.1111, 0.1944, 0.0556, 0.1111, 0.1111, 0.1111, 0.2778, 0.1667, 0.0556, 0.1111, 0.1667, 0.25, 0.1111, 0.1667, 0.2222, 0.1111, 0.1111, 0.3889, 0.3333, 0.3333, 0.1111, 0.1111, 0.3611, 0.3611, 0.2778, 0.3333, 0.2778, 0.3056, 0.3611, 0.1667, 0.5, 0.2778, 0.3333, 0.3889, 0.3889, 0.4444, 0.2778, 0.3333, 0.5556, 0.3889, 0.5, 0.6667, 0.5, NaN, 0.6667, 0.7222, 0.8333, 0.9444], [0.0556, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.0556, 0.0556, 0.1667, 0.0556, 0.0833, 0.1111, 0.1111, 0.1111, 0.0556, 0.1111, 0.0556, 0.0556, 0.1667, 0.1111, 0.1111, 0.0556, 0.0556, 0.0556, 0.0556, 0.1667, 0.1111, 0.1111, 0.1667, 0.1111, 0.1667, 0.1111, 0.1111, 0.1111, 0.1667, 0.1111, 0.0556, 0.1667, 0.1667, 0.1667, 0.2222, 0.1667, 0.2778, 0.3333, 0.2778, 0.1111, 0.2778, 0.3333, 0.3333, 0.2222, 0.2778, 0.2222, 0.2222, 0.1667, 0.3889, 0.5, 0.3889, 0.3333, 0.2778, 0.3889, 0.3333, 0.3333, 0.3889, 0.5, 0.4444, 0.4444, 0.1944, 0.4444, 0.3333, NaN, 0.6111, 0.6667, 0.7778], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.1111, 0.0556, 0.1111, 0.0556, 0.1111, 0.1111, 0.1111, 0.0556, 0.0556, 0.0, 0.1111, 0.0, 0.1111, 0.0556, 0.0556, 0.1111, 0.0556, 0.0556, 0.1111, 0.0556, 0.1667, 0.1111, 0.0556, 0.1111, 0.0556, 0.1111, 0.0556, 0.1667, 0.0556, 0.1111, 0.2222, 0.1111, 0.1111, 0.0556, 0.1667, 0.0556, 0.1667, 0.1667, 0.0556, 0.1667, 0.0556, 0.0556, 0.2778, 0.2222, 0.0556, 0.1667, 0.1667, 0.1667, 0.2222, 0.2778, 0.2778, 0.1111, 0.1667, 0.1667, 0.1667, 0.1111, 0.2222, 0.3333, 0.3333, 0.2222, 0.1667, 0.1667, 0.2778, 0.2222, 0.2778, 0.3333, 0.2222, 0.3889, 0.2222, 0.2778, 0.2778, 0.3889, NaN, 0.6111, 0.7222], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0556, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1111, 0.0556, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.1111, 0.0, 0.0, 0.1111, 0.0, 0.0, 0.0556, 0.1111, 0.1111, 0.0, 0.1111, 0.0556, 0.0, 0.2222, 0.1111, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.1667, 0.1667, 0.0556, 0.1111, 0.1667, 0.1111, 0.0556, 0.1667, 0.1667, 0.1667, 0.1111, 0.2222, 0.1667, 0.2778, 0.2222, 0.2222, 0.2222, 0.1667, 0.2222, 0.2778, 0.0556, 0.1667, 0.3333, 0.3889, NaN, 0.8333], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0, 0.0, 0.0, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.0, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.0556, 0.1111, 0.0556, 0.0556, 0.1111, 0.1111, 0.1111, 0.1111, 0.1111, 0.1111, 0.0556, 0.2222, 0.0556, 0.0556, 0.2222, 0.2778, 0.1667, NaN]], "variants": ["Default", "Tuned", "Tuned + Ens."]};
+  const POINTS = [{"method":"TabFM (default)","model":"TabFM","variant":"Default","family":"Foundation Model","mean":0.9478},{"method":"TabFM+","model":"TabFM+","variant":"","family":"System","mean":0.9451},{"method":"[New] TA-ZSTABFM (default)","model":"[New] TA-ZSTABFM","variant":"Default","family":"Other","mean":0.9233},{"method":"AutoGluon 1.6 (noncommercial, 4h)","model":"AutoGluon 1.6 (noncommercial, 4h)","variant":"","family":"System","mean":0.8968},{"method":"AutoGluon 1.6 (extreme, 4h)","model":"AutoGluon 1.6 (extreme, 4h)","variant":"","family":"System","mean":0.8889},{"method":"EXAONE-Tabular (default)","model":"EXAONE-Tabular","variant":"Default","family":"Foundation Model","mean":0.8462},{"method":"TabPFN-3 (default)","model":"TabPFN-3","variant":"Default","family":"Foundation Model","mean":0.8383},{"method":"TabICLv2 (default)","model":"TabICLv2","variant":"Default","family":"Foundation Model","mean":0.8115},{"method":"RealTabPFN-2.5 (default)","model":"RealTabPFN-2.5","variant":"Default","family":"Foundation Model","mean":0.8032},{"method":"TabPFN-2.6 (default)","model":"TabPFN-2.6","variant":"Default","family":"Foundation Model","mean":0.7923},{"method":"RealTabPFN-2.5 (T+E)","model":"RealTabPFN-2.5","variant":"Tuned + Ens.","family":"Foundation Model","mean":0.7887},{"method":"AutoGluon 1.5 (extreme, 4h)","model":"AutoGluon 1.5 (extreme, 4h)","variant":"","family":"System","mean":0.7837},{"method":"RealTabPFN-2.5 (tuned)","model":"RealTabPFN-2.5","variant":"Tuned","family":"Foundation Model","mean":0.7576},{"method":"RealMLP (T+E)","model":"RealMLP","variant":"Tuned + Ens.","family":"Neural Network","mean":0.7077},{"method":"TabDPT (T+E)","model":"TabDPT","variant":"Tuned + Ens.","family":"Foundation Model","mean":0.7017},{"method":"TabPFNv2 (T+E)","model":"TabPFNv2","variant":"Tuned + Ens.","family":"Foundation Model","mean":0.6908},{"method":"TabDPT (tuned)","model":"TabDPT","variant":"Tuned","family":"Foundation Model","mean":0.6819},{"method":"TabDPT-Turbo (default)","model":"TabDPT-Turbo","variant":"Default","family":"Foundation Model","mean":0.6802},{"method":"Mitra (default)","model":"Mitra","variant":"Default","family":"Foundation Model","mean":0.6743},{"method":"AutoGluon 1.4 (best, 4h)","model":"AutoGluon 1.4 (best, 4h)","variant":"","family":"System","mean":0.6601},{"method":"TabDPT (default)","model":"TabDPT","variant":"Default","family":"Foundation Model","mean":0.6481},{"method":"TabPFNv2 (default)","model":"TabPFNv2","variant":"Default","family":"Foundation Model","mean":0.6422},{"method":"RealMLP (tuned)","model":"RealMLP","variant":"Tuned","family":"Neural Network","mean":0.6293},{"method":"LimiX (default)","model":"LimiX","variant":"Default","family":"Foundation Model","mean":0.6171},{"method":"TabSwift (default)","model":"TabSwift","variant":"Default","family":"Foundation Model","mean":0.6108},{"method":"TabM (T+E)","model":"TabM","variant":"Tuned + Ens.","family":"Neural Network","mean":0.6065},{"method":"CatBoost (tuned)","model":"CatBoost","variant":"Tuned","family":"Tree-based","mean":0.6035},{"method":"TabM (tuned)","model":"TabM","variant":"Tuned","family":"Neural Network","mean":0.5979},{"method":"TabPFNv2 (tuned)","model":"TabPFNv2","variant":"Tuned","family":"Foundation Model","mean":0.5949},{"method":"CatBoost (T+E)","model":"CatBoost","variant":"Tuned + Ens.","family":"Tree-based","mean":0.578},{"method":"SAP-RPT-OSS (default)","model":"SAP-RPT-OSS","variant":"Default","family":"Foundation Model","mean":0.5711},{"method":"iLTM (T+E)","model":"iLTM","variant":"Tuned + Ens.","family":"Foundation Model","mean":0.5615},{"method":"RealMLP (default)","model":"RealMLP","variant":"Default","family":"Neural Network","mean":0.5456},{"method":"xRFM (T+E)","model":"xRFM","variant":"Tuned + Ens.","family":"Other","mean":0.543},{"method":"EBM (T+E)","model":"EBM","variant":"Tuned + Ens.","family":"Tree-based","mean":0.5357},{"method":"LightGBM (T+E)","model":"LightGBM","variant":"Tuned + Ens.","family":"Tree-based","mean":0.5311},{"method":"CatBoost (default)","model":"CatBoost","variant":"Default","family":"Tree-based","mean":0.5202},{"method":"xRFM (tuned)","model":"xRFM","variant":"Tuned","family":"Other","mean":0.5139},{"method":"TabICL (default)","model":"TabICL","variant":"Default","family":"Foundation Model","mean":0.5073},{"method":"XGBoost (T+E)","model":"XGBoost","variant":"Tuned + Ens.","family":"Tree-based","mean":0.4911},{"method":"iLTM (tuned)","model":"iLTM","variant":"Tuned","family":"Foundation Model","mean":0.4878},{"method":"TabM (default)","model":"TabM","variant":"Default","family":"Neural Network","mean":0.4845},{"method":"XGBoost (tuned)","model":"XGBoost","variant":"Tuned","family":"Tree-based","mean":0.4841},{"method":"EBM (default)","model":"EBM","variant":"Default","family":"Tree-based","mean":0.4679},{"method":"EBM (tuned)","model":"EBM","variant":"Tuned","family":"Tree-based","mean":0.463},{"method":"ChimeraBoost (T+E)","model":"ChimeraBoost","variant":"Tuned + Ens.","family":"Tree-based","mean":0.4567},{"method":"ModernNCA (default)","model":"ModernNCA","variant":"Default","family":"Neural Network","mean":0.454},{"method":"ModernNCA (tuned)","model":"ModernNCA","variant":"Tuned","family":"Neural Network","mean":0.453},{"method":"BetaTabPFN (default)","model":"BetaTabPFN","variant":"Default","family":"Foundation Model","mean":0.4444},{"method":"LightGBM (tuned)","model":"LightGBM","variant":"Tuned","family":"Tree-based","mean":0.4441},{"method":"FastaiMLP (T+E)","model":"FastaiMLP","variant":"Tuned + Ens.","family":"Neural Network","mean":0.4421},{"method":"TorchMLP (T+E)","model":"TorchMLP","variant":"Tuned + Ens.","family":"Neural Network","mean":0.4385},{"method":"ModernNCA (T+E)","model":"ModernNCA","variant":"Tuned + Ens.","family":"Neural Network","mean":0.4296},{"method":"ExtraTrees (T+E)","model":"ExtraTrees","variant":"Tuned + Ens.","family":"Tree-based","mean":0.4243},{"method":"TorchMLP (tuned)","model":"TorchMLP","variant":"Tuned","family":"Neural Network","mean":0.4173},{"method":"TabSTAR (T+E)","model":"TabSTAR","variant":"Tuned + Ens.","family":"Foundation Model","mean":0.4144},{"method":"TabSTAR (tuned)","model":"TabSTAR","variant":"Tuned","family":"Foundation Model","mean":0.4074},{"method":"ChimeraBoost (tuned)","model":"ChimeraBoost","variant":"Tuned","family":"Tree-based","mean":0.4064},{"method":"ExtraTrees (tuned)","model":"ExtraTrees","variant":"Tuned","family":"Tree-based","mean":0.4028},{"method":"Nori-30M (default)","model":"Nori-30M","variant":"Default","family":"Foundation Model","mean":0.3929},{"method":"Nori (default)","model":"Nori","variant":"Default","family":"Foundation Model","mean":0.3836},{"method":"ChimeraBoost (default)","model":"ChimeraBoost","variant":"Default","family":"Tree-based","mean":0.377},{"method":"FastaiMLP (tuned)","model":"FastaiMLP","variant":"Tuned","family":"Neural Network","mean":0.3618},{"method":"PerpetualBooster (T+E)","model":"PerpetualBooster","variant":"Tuned + Ens.","family":"Tree-based","mean":0.3452},{"method":"OrionMSP (default)","model":"OrionMSP","variant":"Default","family":"Foundation Model","mean":0.3356},{"method":"TabFlex (default)","model":"TabFlex","variant":"Default","family":"Foundation Model","mean":0.3313},{"method":"RandomForest (T+E)","model":"RandomForest","variant":"Tuned + Ens.","family":"Tree-based","mean":0.3234},{"method":"TabSTAR (default)","model":"TabSTAR","variant":"Default","family":"Foundation Model","mean":0.2983},{"method":"xRFM (default)","model":"xRFM","variant":"Default","family":"Other","mean":0.2943},{"method":"RandomForest (tuned)","model":"RandomForest","variant":"Tuned","family":"Tree-based","mean":0.2937},{"method":"PerpetualBooster (tuned)","model":"PerpetualBooster","variant":"Tuned","family":"Tree-based","mean":0.2887},{"method":"TorchMLP (default)","model":"TorchMLP","variant":"Default","family":"Neural Network","mean":0.2824},{"method":"PerpetualBooster (default)","model":"PerpetualBooster","variant":"Default","family":"Tree-based","mean":0.2642},{"method":"XGBoost (default)","model":"XGBoost","variant":"Default","family":"Tree-based","mean":0.2586},{"method":"ExtraTrees (default)","model":"ExtraTrees","variant":"Default","family":"Tree-based","mean":0.2507},{"method":"iLTM (default)","model":"iLTM","variant":"Default","family":"Foundation Model","mean":0.2321},{"method":"LightGBM (default)","model":"LightGBM","variant":"Default","family":"Tree-based","mean":0.2275},{"method":"FastaiMLP (default)","model":"FastaiMLP","variant":"Default","family":"Neural Network","mean":0.211},{"method":"Linear (T+E)","model":"Linear","variant":"Tuned + Ens.","family":"Baseline","mean":0.208},{"method":"KNN (T+E)","model":"KNN","variant":"Tuned + Ens.","family":"Baseline","mean":0.2024},{"method":"RandomForest (default)","model":"RandomForest","variant":"Default","family":"Tree-based","mean":0.1944},{"method":"Linear (tuned)","model":"Linear","variant":"Tuned","family":"Baseline","mean":0.1892},{"method":"Linear (default)","model":"Linear","variant":"Default","family":"Baseline","mean":0.1448},{"method":"KNN (tuned)","model":"KNN","variant":"Tuned","family":"Baseline","mean":0.084},{"method":"KNN (default)","model":"KNN","variant":"Default","family":"Baseline","mean":0.0337}];
+
+
+  const NS = "http://www.w3.org/2000/svg";
+  // Baseline and Other are one bucket, as in the site's own type legend: they
+  // already share a color, and each holds only a handful of methods.
+  const FAM_MERGED = "Baseline / Other";
+  const famOf = (family) => (family === "Baseline" || family === "Other" ? FAM_MERGED : family);
+  // Normalized up front so every later lookup — colors, chips, sorting — sees
+  // the merged family. Both templates declare POINTS above this block.
+  for (const p of POINTS) p.family = famOf(p.family);
+
+  const FAM_ORDER = ["Foundation Model", "Tree-based", "Neural Network", "System", FAM_MERGED];
+  const FAM_VAR = {
+    "Foundation Model": "var(--fam-foundation)",
+    "Tree-based": "var(--fam-tree)",
+    "Neural Network": "var(--fam-nn)",
+    "System": "var(--fam-system)",
+    [FAM_MERGED]: "var(--fam-baseline)",
+  };
+  // The symbol the website shows for each family, so a family chip here reads the
+  // same as the Type column on the site. Baseline and Other are one bucket, so
+  // that chip carries both symbols.
+  const FAM_SYMBOL = {
+    "Foundation Model": "🧠⚡",
+    "Tree-based": "🌳",
+    "Neural Network": "🧠🔁",
+    "System": "📊",
+    [FAM_MERGED]: "📏 ❓",
+  };
+  // Tuning-variant colours, matching the --var-* tokens the charts plot with.
+  const VARIANT_VAR = {
+    "Default": "var(--var-default)",
+    "Tuned": "var(--var-tuned)",
+    "Tuned + Ens.": "var(--var-tunedens)",
+  };
+
+  // A family chip's label: its symbol, its name and how many methods it holds.
+  function famChipLabel(family, count) {
+    const symbol = FAM_SYMBOL[family];
+    return '<span class="dot"></span>' + (symbol ? '<span class="sym">' + symbol + "</span> " : "") +
+      family + ' <span class="count">&times;' + count + "</span>";
+  }
+
+  // The same hues stepped for use as text (see the --fam-*-ink tokens).
+  const FAM_INK = {
+    "Foundation Model": "var(--fam-foundation-ink)",
+    "Tree-based": "var(--fam-tree-ink)",
+    "Neural Network": "var(--fam-nn-ink)",
+    "System": "var(--fam-system-ink)",
+    [FAM_MERGED]: "var(--fam-baseline-ink)",
+  };
+
+  // Create an SVG element with attributes, optionally appended to `parent`.
+  function el(name, attrs, parent) {
+    const node = document.createElementNS(NS, name);
+    for (const k in attrs) node.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(node);
+    return node;
+  }
+
+  // Rendered width of a string, measured in the live document: font metrics are
+  // not knowable up front, and the label layouts need real widths to decide
+  // where a name breaks and on which side of a point it fits. Memoized per
+  // (weight, size), since the layouts measure the same words repeatedly.
+  function makeTextMeasurer(svg, { size = 13, weight = 400 } = {}) {
+    const cache = new Map();
+    return function textWidth(text) {
+      let w = cache.get(text);
+      if (w === undefined) {
+        const probe = el("text", {
+          "font-size": size, "font-weight": weight, visibility: "hidden",
+        }, svg);
+        probe.textContent = text;
+        w = probe.getComputedTextLength();
+        probe.remove();
+        // A frame that has loaded but not been laid out yet measures every string as 0. Caching
+        // that would bake a broken layout in for good: the label-fitting code would keep reading
+        // 0 on every later redraw and go on stacking names on top of each other. Treat it as
+        // "not measurable yet" and try again next time.
+        if (w > 0 || !text) cache.set(text, w);
+      }
+      return w;
+    };
+  }
+
+  // Redraw when `el` first has a real width, and whenever that width changes.
+  //
+  // A chart sizes itself from its container, so one drawn before layout collapses to its
+  // minimum. `window.onresize` recovers the cases where the viewport changes, but not the one
+  // that actually bites: a frame loaded off-screen is laid out later without its viewport ever
+  // changing, so no resize fires and the collapsed chart is what the reader eventually scrolls
+  // to. A ResizeObserver sees that transition; `onresize` never does.
+  function redrawOnResize(el, draw) {
+    let last = 0, timer = null;
+    const check = () => {
+      const width = Math.round(el.getBoundingClientRect().width);
+      if (!width || width === last) return;
+      last = width;
+      clearTimeout(timer);
+      timer = setTimeout(draw, 60);
+    };
+    if (window.ResizeObserver) new ResizeObserver(check).observe(el);
+    window.addEventListener("resize", check);
+    return check;
+  }
+
+  // Plain, ungrouped numbers with a "." decimal separator. `toFixed` is
+  // locale-independent by definition, which is the point: `toLocaleString`
+  // would follow the *viewer's* browser locale and print 1234,5 for a German
+  // visitor, disagreeing with the figures and CSVs beside it.
+  function fmtNum(v, decimals) {
+    if (v == null || !isFinite(v)) return "—";
+    return v.toFixed(decimals);
+  }
+
+  function fmtMetric(metric, v) {
+    if (v == null || !isFinite(v)) return "—";
+    return fmtNum(v, metric.decimals) + (metric.suffix || "");
+  }
+
+  function fmtTime(v) {
+    if (v >= 100) return fmtNum(v, 0) + " s";
+    if (v >= 1) return fmtNum(v, 1) + " s";
+    if (v >= 0.1) return fmtNum(v, 2) + " s";
+    return fmtNum(v, 3) + " s";
+  }
+
+  // Smallest "nice" (1/2/2.5/5 x a power of ten) step that is at least `raw`.
+  function niceStep(raw) {
+    if (!(raw > 0)) return 1;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const m of [1, 2, 2.5, 5, 10]) {
+      if (mag * m >= raw) return mag * m;
+    }
+    return mag * 10;
+  }
+
+  // ~`target` evenly spaced "nice" tick values covering [min, max]. Stepped by
+  // index rather than by accumulation so fractional steps do not drift.
+  function ticks(min, max, target) {
+    const step = niceStep((max - min) / target);
+    const first = Math.ceil(min / step);
+    const out = [];
+    for (let i = 0; first * step + i * step <= max + 1e-9; i++) out.push((first + i) * step);
+    return out.length ? out : [min];
+  }
+
+  // A hover tooltip anchored inside `box` (which must be position:relative).
+  function makeTooltip(box) {
+    const node = box.querySelector(".tooltip");
+    return {
+      show(html, ev) { node.innerHTML = html; node.style.display = "block"; this.move(ev); },
+      move(ev) {
+        const r = box.getBoundingClientRect();
+        let tx = ev.clientX - r.left + 14;
+        const ty = ev.clientY - r.top + 12;
+        if (tx > r.width - 270) tx = ev.clientX - r.left - 274;
+        node.style.left = tx + "px";
+        node.style.top = ty + "px";
+      },
+      hide() { node.style.display = "none"; },
+    };
+  }
+
+  // Paper view — white surface, legend + chart only — is the *default*: what a
+  // reader wants first is the figure, and it is the state worth exporting. The
+  // controls, chip list and data table are one click away behind "Edit view".
+  // `afterToggle` re-renders charts whose size is measured from the layout.
+  // `options.openInPaper` (default true) decides the state the page opens in. A
+  // chart opens as the figure; the leaderboard table opens with its controls,
+  // since there the interaction is the point rather than scaffolding around it.
+  function setUpPaperView(afterToggle, options) {
+    const opts = options || {};
+    const root = document.documentElement;
+    // The embedding page's choice, read before this function touches the stamp. Captured here
+    // and not on entering paper view: a page that opens *out* of paper view (the tables, where
+    // the controls are the point) would otherwise clear the stamp on its very first call and
+    // then follow the viewer's OS preference — rendering light inside the always-dark site.
+    const hostTheme = root.getAttribute("data-theme");
+    const btn = document.getElementById("btn-paper");
+    const embedded = window.parent !== window;
+
+    function setPaper(on) {
+      document.body.classList.toggle("paper", on);
+      if (on) {
+        root.setAttribute("data-theme", "light");
+      } else if (hostTheme) {
+        root.setAttribute("data-theme", hostTheme);
+      } else {
+        root.removeAttribute("data-theme");
+      }
+      btn.textContent = on ? "Edit view" : "Paper view";
+      document.getElementById("exportbar").hidden = !on || embedded;
+      if (afterToggle) requestAnimationFrame(afterToggle);
+      postHeight();
+    }
+    btn.addEventListener("click", () => setPaper(!document.body.classList.contains("paper")));
+    // Embedded, the host page owns these controls — they sit beside the panel's
+    // static-figure toggle and are driven from the outside. Standalone (the
+    // shareable single file) this page needs its own.
+    if (embedded) document.querySelector(".viewbar").hidden = true;
+    window.addEventListener("message", ev => {
+      const d = ev.data;
+      if (d && d.type === "tabarena-explorer-paper" && typeof d.on === "boolean") setPaper(d.on);
+    });
+    // Only standalone: embedded, the host owns the button and would not see the
+    // key press, so its label would fall out of step with the frame.
+    if (!embedded) {
+      document.addEventListener("keydown", ev => {
+        if (ev.key === "Escape" && !document.body.classList.contains("paper")) setPaper(true);
+      });
+    }
+    setPaper(opts.openInPaper !== false);   // for a chart, the figure is what opens
+  }
+
+  // --- Figure export ---------------------------------------------------------
+  // The chart is live SVG, so a file can be built from it directly. Three things
+  // a copy has to fix up: the colors are CSS custom properties (var(--x) means
+  // nothing outside this document), it has no background or font of its own, and
+  // the legend is HTML rather than part of the SVG.
+
+  // Rebuild the HTML legend as SVG, reusing its live layout: each item's glyph is
+  // cloned and its label re-emitted at the measured position. foreignObject would
+  // be far simpler, but Chrome refuses to rasterize it onto a canvas, which would
+  // break the PNG path.
+  // Rewrite every var(--x) in a clone's paint attributes; they resolve to nothing
+  // once the node leaves this document.
+  function resolveVars(root, resolve) {
+    for (const node of [root, ...root.querySelectorAll("*")]) {
+      for (const attr of ["fill", "stroke"]) {
+        const value = node.getAttribute(attr);
+        if (value && value.includes("var(")) node.setAttribute(attr, resolve(value));
+      }
+    }
+  }
+
+  function legendToSvg(container, resolve) {
+    const base = container.getBoundingClientRect();
+    const group = document.createElementNS(NS, "g");
+    let height = 0;
+    for (const item of container.querySelectorAll(".item")) {
+      const box = item.getBoundingClientRect();
+      if (!box.width) continue;
+      height = Math.max(height, box.bottom - base.top);
+      let textLeft = box.left - base.left;
+      const glyph = item.querySelector("svg");
+      if (glyph) {
+        const gbox = glyph.getBoundingClientRect();
+        const wrap = el("g", {
+          transform: `translate(${gbox.left - base.left} ${gbox.top - base.top})`,
+        }, group);
+        const glyphClone = glyph.cloneNode(true);
+        resolveVars(glyphClone, resolve);
+        wrap.appendChild(glyphClone);
+        textLeft = gbox.right - base.left + 5;
+      }
+      const label = item.textContent.trim();
+      if (!label) continue;
+      const colored = item.querySelector("[style*='color']");
+      const text = el("text", {
+        x: textLeft, y: box.top - base.top + box.height / 2 + 4, "font-size": 12.5,
+        fill: resolve(getComputedStyle(colored || item).color),
+      }, group);
+      text.textContent = label;
+    }
+    return { group, height: Math.ceil(height) };
+  }
+
+  // `parts` is a list of {svg, dx}, so a chart split across panes (the sticky
+  // y-axis beside the scrolling plot) still exports as one figure.
+  function buildExportSvg(parts, legendEl, pad = 10) {
+    const rootStyle = getComputedStyle(document.documentElement);
+    const resolve = value => String(value).replace(
+      /var\((--[\w-]+)\)/g, (_, name) => rootStyle.getPropertyValue(name).trim() || "none");
+    const paper = rootStyle.getPropertyValue("--paper").trim() || "#ffffff";
+
+    let chartW = 0, chartH = 0;
+    for (const part of parts) {
+      chartW = Math.max(chartW, part.dx + Number(part.svg.getAttribute("width")));
+      chartH = Math.max(chartH, Number(part.svg.getAttribute("height")));
+    }
+
+    const out = document.createElementNS(NS, "svg");
+    out.setAttribute("xmlns", NS);
+    out.setAttribute("font-family", 'system-ui, -apple-system, "Segoe UI", sans-serif');
+    let top = pad;
+    const later = [];   // built after the width is known
+    const legend = legendEl ? legendToSvg(legendEl, resolve) : null;
+    if (legend && legend.height) {
+      legend.group.setAttribute("transform", `translate(${pad} ${top})`);
+      later.push(() => out.appendChild(legend.group));
+      top += legend.height + 8;
+    }
+
+    const width = Math.max(chartW, legendEl ? legendEl.getBoundingClientRect().width : 0) + pad * 2;
+    const height = top + chartH + pad;
+    out.setAttribute("width", Math.ceil(width));
+    out.setAttribute("height", Math.ceil(height));
+    el("rect", { x: 0, y: 0, width: Math.ceil(width), height: Math.ceil(height), fill: paper }, out);
+    for (const build of later) build();
+
+    for (const part of parts) {
+      const group = el("g", { transform: `translate(${part.dx + pad} ${top})` }, out);
+      const clone = part.svg.cloneNode(true);
+      resolveVars(clone, resolve);
+      while (clone.firstChild) group.appendChild(clone.firstChild);
+    }
+    return out;
+  }
+
+  // Page title -> a safe file stem, e.g. "tabarena-leaderboard-explorer-all-tasks".
+  function slugify(text) {
+    return (text || "chart").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+  }
+
+  function downloadUrl(url, filename) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // Rasterize the export SVG into a canvas at `scale`, then hand it to `done`.
+  function rasterize(svg, scale, done, fail) {
+    const width = Number(svg.getAttribute("width")), height = Number(svg.getAttribute("height"));
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+      ctx.drawImage(img, 0, 0);
+      done(canvas, width, height);
+    };
+    img.onerror = fail;
+    img.src = "data:image/svg+xml;charset=utf-8,"
+      + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+  }
+
+  // A one-page PDF wrapping the rendered figure, written by hand: a library would
+  // cost this page its zero-dependency, single-file property. The image is stored
+  // losslessly (raw RGB + /FlateDecode via CompressionStream) and the page is sized
+  // in points to the figure's CSS size, so it prints at the size it appears here
+  // and the pixels land at 96*scale dpi.
+  async function buildPdf(canvas, cssWidth, cssHeight) {
+    const pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+    const rgb = new Uint8Array((pixels.length / 4) * 3);
+    for (let i = 0, j = 0; i < pixels.length; i += 4, j += 3) {
+      rgb[j] = pixels[i];
+      rgb[j + 1] = pixels[i + 1];
+      rgb[j + 2] = pixels[i + 2];
+    }
+    const deflated = new Uint8Array(await new Response(
+      new Blob([rgb]).stream().pipeThrough(new CompressionStream("deflate"))).arrayBuffer());
+
+    const encoder = new TextEncoder();
+    const chunks = [];
+    const offsets = [];
+    let cursor = 0;
+    const put = data => {
+      const bytes = typeof data === "string" ? encoder.encode(data) : data;
+      chunks.push(bytes);
+      cursor += bytes.length;
+    };
+    const object = (id, body, stream) => {
+      offsets[id] = cursor;
+      put(`${id} 0 obj\n${body}\n`);
+      if (stream) {
+        put("stream\n");
+        put(stream);
+        put("\nendstream\n");
+      }
+      put("endobj\n");
+    };
+
+    const ptW = (cssWidth * 0.75).toFixed(2), ptH = (cssHeight * 0.75).toFixed(2);
+    const content = `q ${ptW} 0 0 ${ptH} 0 0 cm /Im0 Do Q`;
+    put("%PDF-1.4\n");
+    put(new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));   // binary marker
+    object(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    object(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${ptW} ${ptH}] `
+      + "/Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>");
+    object(4, "<< /Type /XObject /Subtype /Image "
+      + `/Width ${canvas.width} /Height ${canvas.height} /ColorSpace /DeviceRGB `
+      + `/BitsPerComponent 8 /Filter /FlateDecode /Length ${deflated.length} >>`, deflated);
+    object(5, `<< /Length ${content.length} >>`, content);
+
+    const xref = cursor;
+    let table = "xref\n0 6\n0000000000 65535 f \n";
+    for (let id = 1; id <= 5; id++) table += String(offsets[id]).padStart(10, "0") + " 00000 n \n";
+    put(table);
+    put(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+    return new Blob(chunks, { type: "application/pdf" });
+  }
+
+  // Wire up the export buttons; `getParts` is called per click so the file always
+  // matches what is on screen. Returns a `run(format)` the host page can drive.
+  function setUpExport(getParts, basename) {
+    const buttons = {
+      svg: document.getElementById("btn-svg"),
+      png: document.getElementById("btn-png"),
+      pdf: document.getElementById("btn-pdf"),
+    };
+    const figure = () => buildExportSvg(getParts(), document.getElementById("legendstrip"));
+
+    // A sandboxed frame has no modals, so a failure is reported on the button.
+    function complain(format) {
+      const button = buttons[format];
+      if (!button) return;
+      const label = button.textContent;
+      button.textContent = "failed";
+      setTimeout(() => { button.textContent = label; }, 2500);
+    }
+
+    function run(format) {
+      const svg = figure();
+      const name = basename();
+      if (format === "svg") {
+        downloadUrl("data:image/svg+xml;charset=utf-8,"
+          + encodeURIComponent(new XMLSerializer().serializeToString(svg)), name + ".svg");
+        return;
+      }
+      // 3x for a screen-resolution PNG; 2x for the PDF, whose page is sized in
+      // points so the pixels already land near 200 dpi at print size.
+      rasterize(svg, format === "pdf" ? 2 : 3, (canvas, cssWidth, cssHeight) => {
+        if (format === "png") {
+          canvas.toBlob(blob => downloadUrl(URL.createObjectURL(blob), name + ".png"), "image/png");
+        } else {
+          buildPdf(canvas, cssWidth, cssHeight)
+            .then(blob => downloadUrl(URL.createObjectURL(blob), name + ".pdf"))
+            .catch(() => complain("pdf"));
+        }
+      }, () => complain(format));
+    }
+
+    for (const format of Object.keys(buttons)) {
+      if (buttons[format]) buttons[format].addEventListener("click", () => run(format));
+    }
+    // Embedded, the buttons live in the host's panel header (see main.taExport).
+    window.addEventListener("message", ev => {
+      const d = ev.data;
+      if (d && d.type === "tabarena-explorer-export" && buttons[d.format] !== undefined) run(d.format);
+    });
+  }
+
+  // When embedded, report the content height so the host page can size the
+  // iframe to fit (avoids an inner scrollbar). Works from a sandboxed frame.
+  // Measure the body (viewport-independent) — documentElement.scrollHeight is
+  // clamped to at least the iframe's current viewport, which turns the
+  // resize round-trip into a grow-forever feedback loop. The change guard
+  // stops re-posting once the height settles.
+  let lastPostedHeight = 0;
+  function postHeight() {
+    if (window.parent === window) return;
+    const height = Math.ceil(document.body.offsetHeight);
+    if (Math.abs(height - lastPostedHeight) < 3) return;
+    lastPostedHeight = height;
+    window.parent.postMessage({ type: "tabarena-explorer-height", height: height }, "*");
+  }
+
+
+  // POINTS is one record per matrix label (its model, variant, family and mean
+  // win rate); the matrix itself is CONFIG.matrix, row-major over CONFIG.methods.
+  const METHODS = CONFIG.methods;
+  const MATRIX = CONFIG.matrix;
+  const rowOf = new Map(METHODS.map((m, i) => [m, i]));
+  const info = new Map(POINTS.map(p => [p.method, p]));
+  const MODELS = [...new Set(POINTS.map(p => p.model))];
+  const VARIANTS = CONFIG.variants.filter(v => POINTS.some(p => p.variant === v));
+  const VARIANT_BTN = { "Tuned + Ens.": "Tuned + Ensembled" };
+
+  // Nothing is hidden on load. Which entrants compete is now decided upstream by the
+  // leaderboard's entrant pool (see tabarena.evaluation.entrants): if a system is in this
+  // matrix at all, the reader picked a pool that includes it, and its win-rates were
+  // computed against that field. Hiding it here would contradict that choice.
+  const OFF_BY_DEFAULT = new Set([]);
+  const familyOf = new Map(POINTS.map(p => [p.model, p.family]));
+  const DEFAULT_MODELS = MODELS.filter(m => !OFF_BY_DEFAULT.has(familyOf.get(m)));
+
+  const state = {
+    models: new Set(DEFAULT_MODELS.length > 1 ? DEFAULT_MODELS : MODELS),
+    variants: new Set(VARIANTS),
+    // One entry per model by default, as the static figure shows it: 80 rows of
+    // model-variant pairs is a wall, and the comparison people want first is
+    // between models.
+    best: true,
+    order: "published",
+    // Default to fitting the panel: at reading size the matrix is taller than a
+    // screen, and the shape of the heatmap is what most readers want first.
+    zoom: "fit",
+  };
+  // Ceiling on the fitted height. Fitting is normally width-driven; this only bites
+  // on very tall selections, and it is set where the labels are still readable
+  // rather than at half a screen, which would shrink 30 rows to 8px type.
+  const FIT_H = 1040;
+  // Nominal (drawn) size of the last render; the display size is a CSS scale of it.
+  let nomW = 0, nomH = 0;
+  const svg = document.getElementById("chart");
+  const wrap = document.getElementById("wrap");
+  const tooltip = document.querySelector(".tooltip");
+  const chipsBox = document.getElementById("chips");
+  const famChips = new Map();
+  const chipByModel = new Map();
+
+  // Sized against the static figure rather than the other explorers: that one uses
+  // 16pt tick labels and 18pt axis labels on generously sized cells, and it stayed
+  // the easier of the two to read. Weight still matches the explorers' 650, so a
+  // model name looks like the same name everywhere.
+  const LABEL_SIZE = 16, LABEL_WEIGHT = 650, CAPTION_SIZE = 18, CELL = 42, VALUE_SIZE = 15;
+  // The colour key is a vertical bar to the right of the matrix, as on the static
+  // figure. It sits beside the rows rather than above them, so it is in view
+  // wherever the reader is in a tall matrix.
+  const BAR_W = 30, BAR_GAP = 32, TICK_SIZE = 15;
+  const SCALE_CAPTION = "win rate of the row over the column";
+  const SCALE_CAPTION_SHORT = "win rate";
+
+  // Purple (the column wins) through white to green (the row wins), the same
+  // diverging reading as the static figure's PRGn colormap.
+  const LOSE = [118, 42, 131], MID = [247, 247, 247], WIN = [27, 120, 55];
+  function cellColor(rate) {
+    if (rate == null || !isFinite(rate)) return "#8884";
+    const t = Math.max(0, Math.min(1, rate));
+    const [a, b, u] = t < 0.5 ? [LOSE, MID, t / 0.5] : [MID, WIN, (t - 0.5) / 0.5];
+    return "rgb(" + a.map((v, i) => Math.round(v + u * (b[i] - v))).join(",") + ")";
+  }
+
+  // Measured where possible: the labels are model names of wildly different
+  // lengths, and the margins have to clear the longest one exactly or a rotated
+  // column label runs into the caption above it. `getComputedTextLength` returns 0
+  // when the frame has not been laid out yet (it is lazily loaded, and may still be
+  // off-screen on the first paint), which would collapse both margins and push
+  // every label outside the viewBox — invisible until something forced a redraw.
+  // So fall back to an estimate, and redraw once the fonts have settled.
+  function textWidth(text, size, weight) {
+    const probe = el("text", {
+      "font-size": size || LABEL_SIZE, "font-weight": weight || LABEL_WEIGHT,
+    }, svg);
+    probe.textContent = text;
+    let width = 0;
+    try { width = probe.getComputedTextLength(); } catch (e) { width = 0; }
+    probe.remove();
+    return width > 0 ? width : text.length * (size || LABEL_SIZE) * 0.58;
+  }
+
+  // Labels always carry their variant tag — "(default)" / "(tuned + ensembled)" —
+  // including in one-per-model mode, where the tag is precisely what says which
+  // variant survived the filter. The static figure labels them the same way.
+  function labelText(label) {
+    return label;
+  }
+
+  function shown() {
+    let list = METHODS.filter(label => {
+      const p = info.get(label);
+      if (!p || !state.models.has(p.model)) return false;
+      return !p.variant || state.variants.has(p.variant);
+    });
+    if (state.best) {
+      // Best *among the variants still selected*, so the variant toggles keep
+      // meaning something in this mode.
+      const pick = new Map();
+      for (const label of list) {
+        const p = info.get(label);
+        const held = pick.get(p.model);
+        if (!held || (info.get(held).mean || 0) < (p.mean || 0)) pick.set(p.model, label);
+      }
+      list = list.filter(label => pick.get(info.get(label).model) === label);
+    }
+    if (state.order === "winrate") {
+      list.sort((a, b) => (info.get(b).mean || 0) - (info.get(a).mean || 0));
+    } else if (state.order === "name") {
+      list.sort((a, b) => labelText(a).localeCompare(labelText(b)));
+    }
+    return list;
+  }
+
+  function render() {
+    const list = shown();
+    svg.innerHTML = "";
+    if (list.length < 2) {
+      svg.setAttribute("width", 0);
+      svg.setAttribute("height", 0);
+      // Also drop the display scale, or the empty chart keeps the last figure's box.
+      svg.style.width = svg.style.height = "";
+      nomW = nomH = 0;
+      wrap.querySelector(".wr-empty") ||
+        wrap.insertAdjacentHTML("beforeend",
+          '<p class="wr-empty">Select at least two models to compare.</p>');
+      postHeight();
+      return;
+    }
+    const empty = wrap.querySelector(".wr-empty");
+    if (empty) empty.remove();
+
+    const widths = list.map(label => textWidth(labelText(label)));
+    const longest = Math.max(...widths);
+    // A label rotated -60° rises 0.866 of its length; the captions sit in the
+    // corner box rather than above the columns, where long names would cross them.
+    // Floor the header so the two corner captions always have room, even when
+    // every selected name is short.
+    const headerH = Math.max(Math.ceil(longest * 0.866) + 14, 2 * CAPTION_SIZE + 26);
+    const labelW = Math.ceil(longest) + 16;
+    const n = list.length;
+    // A -60° label anchored at (x, y) reaches (x + 0.5L, y - 0.866L): it grows up
+    // *and right*. headerH covers the rise; this covers the run, or the rightmost
+    // column's name is clipped by half its length.
+    const overhang = Math.ceil(longest * 0.5);
+    const matrixRight = labelW + n * CELL;
+    // The key occupies the band to the right of the matrix; the label overhang is
+    // above the matrix, so the two never collide and the wider of the two wins.
+    const tickW = Math.ceil(textWidth("100%", TICK_SIZE, 700));
+    const barX = matrixRight + BAR_GAP;
+    const keyRight = barX + BAR_W + 12 + tickW + 10 + CAPTION_SIZE;
+    const width = Math.max(matrixRight + overhang + 12, keyRight + 10);
+    const height = headerH + n * CELL + 12;
+    svg.setAttribute("width", width);
+    svg.setAttribute("height", height);
+    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+
+    // Captions, stacked in the corner box and bold, as on the static figure.
+    const capB = el("text", {
+      x: 4, y: headerH - 34, "font-size": CAPTION_SIZE, "font-weight": 700, fill: "var(--ink)",
+    }, svg);
+    capB.textContent = "Model B: loser →";
+    const capA = el("text", {
+      x: 4, y: headerH - 14, "font-size": CAPTION_SIZE, "font-weight": 700, fill: "var(--ink)",
+    }, svg);
+    capA.textContent = "Model A: winner ↓";
+
+    list.forEach((label, j) => {
+      const x = labelW + j * CELL + CELL / 2 + 4;
+      const text = el("text", {
+        x: x, y: headerH - 8, "font-size": LABEL_SIZE, "font-weight": LABEL_WEIGHT,
+        "text-anchor": "start", fill: FAM_INK[info.get(label).family] || "var(--ink)",
+        transform: "rotate(-60 " + x + " " + (headerH - 8) + ")", cursor: "pointer",
+      }, svg);
+      text.textContent = labelText(label);
+      text.addEventListener("click", () => toggleModel(info.get(label).model));
+    });
+
+    list.forEach((rowLabel, i) => {
+      const y = headerH + i * CELL;
+      const text = el("text", {
+        x: labelW - 12, y: y + CELL / 2 + 6, "font-size": LABEL_SIZE, "font-weight": LABEL_WEIGHT,
+        "text-anchor": "end", fill: FAM_INK[info.get(rowLabel).family] || "var(--ink)",
+        cursor: "pointer",
+      }, svg);
+      text.textContent = labelText(rowLabel);
+      text.addEventListener("click", () => toggleModel(info.get(rowLabel).model));
+
+      list.forEach((colLabel, j) => {
+        const rate = valueAt(rowLabel, colLabel);
+        const x = labelW + j * CELL;
+        const same = rowLabel === colLabel;
+        const rect = el("rect", {
+          x: x, y: y, width: CELL - 1, height: CELL - 1, rx: 2,
+          fill: same ? "#8883" : cellColor(rate),
+        }, svg);
+        if (same) return;
+        const value = el("text", {
+          x: x + (CELL - 1) / 2, y: y + CELL / 2 + 5.5, "font-size": VALUE_SIZE,
+          "font-weight": 600, "text-anchor": "middle",
+          fill: Math.abs(rate - 0.5) > 0.3 ? "#ffffff" : "#14161a", "pointer-events": "none",
+        }, svg);
+        value.textContent = rate == null || !isFinite(rate) ? "" : Math.round(rate * 100);
+        rect.addEventListener("mousemove", ev => showTip(ev, rowLabel, colLabel, rate));
+        rect.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+      });
+    });
+
+    drawScale(barX, headerH, n * CELL - 2, tickW);
+    nomW = width;
+    nomH = height;
+    applyZoom();
+  }
+
+  // Scale the figure for display only: the width/height *attributes* stay nominal,
+  // so the export helpers keep building full-size figures, and the CSS box drives
+  // what the page shows (the viewBox does the scaling, so it stays vector-sharp).
+  function applyZoom() {
+    if (!nomW || !nomH) return;
+    let scale = Number(state.zoom);
+    if (!(scale > 0)) {
+      const availW = Math.max(240, (wrap.clientWidth || nomW) - 4);
+      scale = Math.min(1, availW / nomW, FIT_H / nomH);
+    }
+    svg.style.width = Math.round(nomW * scale) + "px";
+    svg.style.height = Math.round(nomH * scale) + "px";
+    postHeight();
+  }
+
+  // The colour key, drawn into the figure so it is there in paper view and in an
+  // exported SVG/PNG/PDF, not only beside the live chart.
+  function drawScale(x, y, barH, tickW) {
+    const id = "wr-ramp";
+    const grad = el("linearGradient", { id: id, x1: "0", x2: "0", y1: "0", y2: "1" },
+      el("defs", {}, svg));
+    // Top of the bar is the row winning outright, the bottom is the column winning.
+    for (const [offset, rate] of [[0, 1], [0.5, 0.5], [1, 0]]) {
+      el("stop", { offset: offset, "stop-color": cellColor(rate) }, grad);
+    }
+    el("rect", {
+      x: x, y: y, width: BAR_W, height: barH, rx: 7,
+      fill: "url(#" + id + ")", stroke: "var(--muted)", "stroke-width": 1,
+    }, svg);
+    for (const [frac, label] of [[0, "100%"], [0.5, "50%"], [1, "0%"]]) {
+      const ty = y + frac * barH;
+      el("line", {
+        x1: x + BAR_W, y1: ty, x2: x + BAR_W + 6, y2: ty,
+        stroke: "var(--muted)", "stroke-width": 1.5,
+      }, svg);
+      const tick = el("text", {
+        x: x + BAR_W + 11, y: ty + TICK_SIZE * 0.36, "font-size": TICK_SIZE,
+        "font-weight": 700, "text-anchor": "start", fill: "var(--ink)",
+      }, svg);
+      tick.textContent = label;
+    }
+    // The label reads down the bar. It shortens rather than growing past the bar
+    // when only a couple of models are selected: anything above the bar would run
+    // into the rightmost column's rotated name.
+    const size = CAPTION_SIZE - 2;
+    const cx = x + BAR_W + 11 + tickW + 10 + size * 0.5;
+    const cy = y + barH / 2;
+    const caption = el("text", {
+      x: cx, y: cy, "font-size": size, "font-weight": 700,
+      "text-anchor": "middle", fill: "var(--ink)",
+      transform: "rotate(90 " + cx + " " + cy + ")",
+    }, svg);
+    caption.textContent =
+      textWidth(SCALE_CAPTION, size, 700) <= barH ? SCALE_CAPTION : SCALE_CAPTION_SHORT;
+  }
+
+  function valueAt(rowLabel, colLabel) {
+    const i = rowOf.get(rowLabel), j = rowOf.get(colLabel);
+    if (i == null || j == null) return null;
+    const row = MATRIX[i];
+    return row ? row[j] : null;
+  }
+
+  function showTip(ev, rowLabel, colLabel, rate) {
+    tooltip.style.display = "block";
+    tooltip.innerHTML =
+      '<div class="t-name">' + rowLabel + " vs " + colLabel + "</div>" +
+      "<div>" + rowLabel + " wins " + fmtNum(rate * 100, 1) + "% of tasks</div>" +
+      '<div class="t-var">' + colLabel + " wins " + fmtNum((1 - rate) * 100, 1) + "%</div>";
+    const box = document.body.getBoundingClientRect();
+    tooltip.style.left = (ev.clientX - box.left + 14) + "px";
+    tooltip.style.top = (ev.clientY - box.top + 12) + "px";
+  }
+
+  // ---------- model chips, by family ----------
+  function familyModels(fam) {
+    return [...new Set(POINTS.filter(p => p.family === fam).map(p => p.model))];
+  }
+  function meanOfModel(model) {
+    const values = POINTS.filter(p => p.model === model && isFinite(p.mean)).map(p => p.mean);
+    return values.length ? Math.max(...values) : 0;
+  }
+  function buildChips() {
+    const head = document.createElement("div");
+    head.className = "chips-head";
+    head.textContent = "Models compared — click to remove, click a family to toggle the whole group";
+    chipsBox.appendChild(head);
+    for (const fam of FAM_ORDER) {
+      const members = familyModels(fam);
+      if (!members.length) continue;
+      members.sort((a, b) => meanOfModel(b) - meanOfModel(a));
+      const row = document.createElement("div");
+      row.className = "chiprow";
+      const famBtn = document.createElement("button");
+      famBtn.className = "famchip";
+      famBtn.style.setProperty("--fam", FAM_VAR[fam]);
+      famBtn.innerHTML = famChipLabel(fam, members.length);
+      famBtn.title = "Toggle all " + members.length + " " + fam + " models";
+      famBtn.addEventListener("click", () => toggleFamily(fam));
+      row.appendChild(famBtn);
+      famChips.set(fam, famBtn);
+      const set = document.createElement("div");
+      set.className = "chipset";
+      for (const model of members) {
+        const b = document.createElement("button");
+        b.className = "chip";
+        b.style.setProperty("--fam", FAM_VAR[fam]);
+        b.innerHTML = '<span class="dot"></span><span></span>';
+        b.lastChild.textContent = model;
+        b.title = model + " — best mean win rate " + fmtNum(meanOfModel(model) * 100, 1) + "%";
+        b.addEventListener("click", () => toggleModel(model));
+        set.appendChild(b);
+        chipByModel.set(model, b);
+      }
+      row.appendChild(set);
+      chipsBox.appendChild(row);
+    }
+  }
+  function syncChips() {
+    for (const [model, b] of chipByModel) b.setAttribute("aria-pressed", String(state.models.has(model)));
+    for (const [fam, b] of famChips) {
+      b.setAttribute("aria-pressed", String(familyModels(fam).every(m => state.models.has(m))));
+    }
+  }
+  function toggleModel(model) {
+    if (state.models.has(model)) state.models.delete(model); else state.models.add(model);
+    syncChips();
+    render();
+  }
+  function toggleFamily(fam) {
+    const members = familyModels(fam);
+    const allOn = members.every(m => state.models.has(m));
+    for (const m of members) { if (allOn) state.models.delete(m); else state.models.add(m); }
+    syncChips();
+    render();
+  }
+
+  // ---------- variant toggles ----------
+  const variantBtns = new Map();
+  function buildVariantBtns() {
+    const box = document.getElementById("variant-btns");
+    for (const v of VARIANTS) {
+      const b = document.createElement("button");
+      b.className = "btn toggle";
+      b.innerHTML = '<span class="swatch"></span>';
+      // Spelled out: the matrix labels carry the long form the data uses, so the
+      // toggle should not be the only place showing the abbreviated key.
+      b.appendChild(document.createTextNode(VARIANT_BTN[v] || v));
+      b.style.setProperty("--fam", VARIANT_VAR[v] || "var(--accent)");
+      b.title = "Show or hide the " + (VARIANT_BTN[v] || v).toLowerCase() + " results";
+      b.addEventListener("click", () => {
+        if (state.variants.has(v)) state.variants.delete(v); else state.variants.add(v);
+        syncVariantBtns();
+        render();
+      });
+      box.appendChild(b);
+      variantBtns.set(v, b);
+    }
+  }
+  function syncVariantBtns() {
+    for (const [v, b] of variantBtns) b.setAttribute("aria-pressed", String(state.variants.has(v)));
+  }
+
+  // ---------- boot ----------
+  if (CONFIG.title) document.getElementById("title").textContent = CONFIG.title;
+  document.getElementById("zoom-select").addEventListener("change", ev => {
+    state.zoom = ev.target.value;
+    applyZoom();
+  });
+  window.addEventListener("resize", applyZoom);
+  // Embedded in a lazily shown panel, the first render can measure a zero-width
+  // panel; re-fit once it has a width. Width changes only, so the height applyZoom
+  // itself produces cannot feed back into another fit.
+  if (window.ResizeObserver) {
+    let lastWidth = 0;
+    new ResizeObserver(() => {
+      const w = wrap.clientWidth;
+      if (Math.abs(w - lastWidth) < 2) return;
+      lastWidth = w;
+      applyZoom();
+    }).observe(wrap);
+  }
+  document.getElementById("order-select").addEventListener("change", ev => {
+    state.order = ev.target.value;
+    render();
+  });
+  const bestBtn = document.getElementById("btn-best");
+  bestBtn.style.setProperty("--fam", "var(--accent)");
+  bestBtn.addEventListener("click", () => {
+    state.best = !state.best;
+    bestBtn.setAttribute("aria-pressed", String(state.best));
+    render();
+  });
+  bestBtn.setAttribute("aria-pressed", String(state.best));
+  setUpPaperView(render);
+  setUpExport(() => [{ svg: svg, dx: 0 }], () => slugify(CONFIG.title || document.title));
+  buildVariantBtns();
+  buildChips();
+  syncChips();
+  syncVariantBtns();
+  render();
+  // The first render may have had to estimate label widths (see textWidth); redraw
+  // with real measurements as soon as the fonts are in.
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
+})();
+</script>
+</body>
+</html>
